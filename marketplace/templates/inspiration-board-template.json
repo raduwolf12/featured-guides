@@ -1,0 +1,76 @@
+{
+  "guide": {
+    "title": "Inspiration Board Template",
+    "location": null,
+    "description": "A loose, no-days bucket-list layout for gathering ideas before you've committed to an itinerary — organized by theme instead of by day.",
+    "template": "blank"
+  },
+  "blocks": [
+    {
+      "type": "heading",
+      "data": {
+        "text": "How to use this template",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "This one has no day structure on purpose — it's for gathering ideas before you've locked in dates. Group places by theme, replace the \"Example:\" ones with real finds, then either publish it loose like this or switch the template to Itinerary later once you've picked your days."
+      }
+    },
+    {
+      "type": "divider",
+      "data": {}
+    },
+    {
+      "type": "heading",
+      "data": {
+        "text": "Must-see",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: The one thing you don't want to miss",
+        "category": "Attraction"
+      }
+    },
+    {
+      "type": "heading",
+      "data": {
+        "text": "Must-eat",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: A dish or restaurant you keep hearing about",
+        "category": "Restaurant"
+      }
+    },
+    {
+      "type": "heading",
+      "data": {
+        "text": "Hidden gems",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: Something off the main tourist path",
+        "category": "Other"
+      }
+    },
+    {
+      "type": "quote",
+      "data": {
+        "text": "Not all those who wander are lost.",
+        "attribution": "J.R.R. Tolkien"
+      }
+    }
+  ]
+}

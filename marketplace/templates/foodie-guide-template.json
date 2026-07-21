@@ -1,0 +1,83 @@
+{
+  "guide": {
+    "title": "Foodie Guide Template",
+    "location": null,
+    "description": "A category-grouped starting point for a food-focused guide — organized by meal instead of by day. Replace each \"Example:\" place with a real recommendation, then delete this note.",
+    "template": "list"
+  },
+  "blocks": [
+    {
+      "type": "heading",
+      "data": {
+        "text": "How to use this template",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "Rename this guide and set its location. Replace each \"Example:\" place with a real recommendation — search OpenTripMap, pull from a Collection, or add it by hand — then delete this note."
+      }
+    },
+    {
+      "type": "divider",
+      "data": {}
+    },
+    {
+      "type": "heading",
+      "data": {
+        "text": "Breakfast & Coffee",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: Your favorite breakfast spot",
+        "category": "Bar/Cafe"
+      }
+    },
+    {
+      "type": "heading",
+      "data": {
+        "text": "Lunch",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: A reliable lunch spot",
+        "category": "Restaurant"
+      }
+    },
+    {
+      "type": "heading",
+      "data": {
+        "text": "Dinner",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: Your go-to dinner recommendation",
+        "category": "Restaurant"
+      }
+    },
+    {
+      "type": "heading",
+      "data": {
+        "text": "Drinks & Nightlife",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: A bar worth staying for",
+        "category": "Bar/Cafe"
+      }
+    }
+  ]
+}

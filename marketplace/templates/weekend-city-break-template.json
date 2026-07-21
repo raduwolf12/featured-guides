@@ -1,0 +1,92 @@
+{
+  "guide": {
+    "title": "Weekend City Break Template (3 Days)",
+    "location": null,
+    "description": "A ready-made skeleton for a short weekend trip. Rename this guide, set its destination, then replace every \"Example:\" place below with a real one you found — search OpenTripMap, pull from a Collection, or add it by hand. Delete the placeholders and this note once you're done.",
+    "template": "itinerary"
+  },
+  "blocks": [
+    {
+      "type": "heading",
+      "data": {
+        "text": "How to use this template",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "Rename this guide and set its location above. Each day already has one or two example places — replace them with real spots (search OpenTripMap, pull from a Collection, or add manually), then delete this note and the heading above it."
+      }
+    },
+    {
+      "type": "divider",
+      "data": {}
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 1,
+        "title": "Arrival"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: Your hotel",
+        "category": "Hotel",
+        "description": "Where you're staying — replace with the real name and address."
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: Dinner near your hotel",
+        "category": "Restaurant",
+        "description": "Something easy for the first night after you land."
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 2,
+        "title": "Sightseeing"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: The must-see landmark",
+        "category": "Attraction"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: Lunch spot",
+        "category": "Restaurant"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: An evening bar or café",
+        "category": "Bar/Cafe"
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 3,
+        "title": "Departure"
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: One last coffee before you leave",
+        "category": "Bar/Cafe"
+      }
+    }
+  ]
+}

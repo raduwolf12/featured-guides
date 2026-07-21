@@ -1,0 +1,127 @@
+{
+  "guide": {
+    "title": "Road Trip Itinerary Template (5 Days)",
+    "location": null,
+    "description": "A day-by-day skeleton for a multi-stop road trip. Each day has a short driving note and one example stop — fill in the real route, driving times, and places, then delete this note.",
+    "template": "itinerary"
+  },
+  "blocks": [
+    {
+      "type": "heading",
+      "data": {
+        "text": "How to use this template",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "Rename this guide and set its overall region or route. Each day below has a short body note for the drive itself plus one example stop — replace both with your real route and places, then delete this note."
+      }
+    },
+    {
+      "type": "divider",
+      "data": {}
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 1,
+        "title": "Starting point"
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "Pick up your car / start driving here. Note the rough distance and drive time to tonight's stop."
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: Tonight's town or campsite",
+        "category": "Hotel"
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 2,
+        "title": null
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "Drive day — note the route and any stops along the way."
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: A scenic stop worth the detour",
+        "category": "Nature"
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 3,
+        "title": null
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "Drive day — note the route and any stops along the way."
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: A town worth stopping in",
+        "category": "Attraction"
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 4,
+        "title": null
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "Drive day — note the route and any stops along the way."
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: Tonight's stop",
+        "category": "Hotel"
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 5,
+        "title": "Final stretch"
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "Last leg of the trip — note the route back to drop-off."
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Example: Car drop-off / final destination",
+        "category": "Transport"
+      }
+    }
+  ]
+}
