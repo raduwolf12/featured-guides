@@ -1,0 +1,29 @@
+[
+  {
+    "id": "5-best-hikes-in-seoul-all-levels-free",
+    "title": "5 Best Hikes in Seoul (All Levels) FREE",
+    "location": "Seoul",
+    "description": "If you have a love for hiking, want to get out of the city for a couple of hours, or\nsee Seoul from above, then this guide is for you. I enjoy hiking myself and have\ntried most of the available hikes in and around Seoul.",
+    "placeCount": 5,
+    "days": null,
+    "file": "guides/5-best-hikes-in-seoul-all-levels-free.json"
+  },
+  {
+    "id": "seoul-busan-in-10-days",
+    "title": "Seoul - Busan in 10 days",
+    "location": "Seoul",
+    "description": "Explore the vibrant cities of Seoul and Busan in just 10 days, experiencing their\nrich culture, delicious food, and unique sights. This guide takes you through must-\nvisit spots, local experiences, and tips to make the most of your trip. Get ready to\ndiscover the perfect blend of tradition and modernity in South Korea’s top\ndestinations.",
+    "placeCount": 28,
+    "days": 10,
+    "file": "guides/seoul-busan-in-10-days.json"
+  },
+  {
+  "id": "short-upper-mustang-trek-explore",
+  "title": "Short Upper Mustang Trek | Explore",
+  "location": "Mustang",
+  "description": "Short Upper Mustang Trek Explore Mustang in 7-10 Days\nEmbark on an unforgettable journey through the mystical landscapes of Upper\nMustang with our Short Upper Mustang Trek. Designed for adventure seekers with\nlimited time, this 7-10 day trek o ff ers a perfect blend of Nepal’s cultural heritage,\nancient Tibetan villages, and stunning desert-like scenery. Explore hidden caves,\nmonasteries, and the unique Mustang architecture while trekking through Lo\nManthang, the walled city at the heart of Upper Mustang.\nThis Mustang trekking itinerary is ideal for travelers looking to experience high-\naltitude trekking in Nepal, witness the breathtaking Himalayan views, and\nimmerse themselves in the rich Tibetan-in fl uenced culture. The trek covers\nmoderate distances each day, with manageable altitudes, making it suitable for\nboth novice and experienced trekkers.\nExperience the charm of Mustang’s remote trails, traditional homestays, and\nvibrant local festivals. Our Upper Mustang trek package includes guided tours,\n\naccommodations, and meals, ensuring a hassle-free adventure. Whether you are\na solo traveler, couple, or small group, this short trek provides a once-in-a-lifetime\nHimalayan experience without the need for a long expedition.",
+  "placeCount": 14,
+  "days": 8,
+  "file": "guides/short-upper-mustang-trek-explore.json"
+  }
+]
