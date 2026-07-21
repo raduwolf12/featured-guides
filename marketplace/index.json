@@ -9,13 +9,17 @@
     "file": "guides/5-best-hikes-in-seoul-all-levels-free.json"
   },
   {
-    "id": "seoul-busan-in-10-days",
-    "title": "Seoul - Busan in 10 days",
-    "location": "Seoul",
-    "description": "Explore the vibrant cities of Seoul and Busan in just 10 days, experiencing their\nrich culture, delicious food, and unique sights. This guide takes you through must-\nvisit spots, local experiences, and tips to make the most of your trip. Get ready to\ndiscover the perfect blend of tradition and modernity in South Korea’s top\ndestinations.",
-    "placeCount": 28,
-    "days": 10,
-    "file": "guides/seoul-busan-in-10-days.json"
+  "id": "seoul-busan-in-10-days",
+  "title": "Seoul - Busan in 10 days",
+  "location": "Seoul",
+  "description": "Explore the vibrant cities of Seoul and Busan in just 10 days, experiencing their\nrich culture, delicious food, and unique sights. This guide takes you through must-\nvisit spots, local experiences, and tips to make the most of your trip. Get ready to\ndiscover the perfect blend of tradition and modernity in South Korea’s top\ndestinations.",
+  "author": "raduwolf12",
+  "coverPhoto": "data:image/jpeg;base64,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",
+  "placeCount": 28,
+  "days": 10,
+  "addedAt": "2026-07-21",
+  "updatedAt": "2026-07-21",
+  "file": "guides/seoul-busan-in-10-days.json"
   },
   {
   "id": "short-upper-mustang-trek-explore",
