@@ -185,7 +185,58 @@ const CATEGORY_WORDS = new Set([
   'guest house', 'apartment', 'apartments', 'cafe', 'café', 'bar', 'museum', 'park',
   'beach', 'trail', 'viewpoint', 'campsite', 'gas station', 'supermarket', 'shop', 'spa',
   'lighthouse', 'church', 'bakery', 'winery', 'brewery', 'landmark', 'monument', 'other',
+  // Cuisine/nationality words, used as the "category" tag on restaurant-type entries in real
+  // exports just as often as the word "Restaurant" itself (seen repeatedly: "Korean", "Bakery"
+  // tagging what are clearly restaurants) — without these, that whole entry was invisible to
+  // the static parser, since it requires the line right after a name to be an exact category word.
+  'korean', 'japanese', 'chinese', 'thai', 'italian', 'french', 'indian', 'vietnamese',
+  'mexican', 'seafood', 'bbq', 'pizza', 'sushi', 'noodles', 'steakhouse', 'bistro', 'diner',
+  'dessert', 'brunch',
 ]);
+
+// Mindtrip apparently has a distinct "Location" entry type (its own stats line even says so:
+// "7 Attractions / 6 Locations") that, unlike every other category, never actually prints the
+// word "Location" as its tag — instead the line right after the name is just a region/country
+// line ("Kathmandu / Central Region, Nepal / ...", "Bukchon Hanok Village / Seoul, South Korea /
+// ..."), which CATEGORY_WORDS' exact-match check can't catch. An earlier, looser attempt at this
+// (any short, digit-free, punctuation-free line) was tested directly against these five real
+// exports and turned out to match almost anything short — roughly tripling place counts with
+// junk like "Difficulty" + "Easy to Moderate". Requiring the line to actually END in a real
+// country name is far more specific and produced zero false positives across all five samples.
+const COUNTRY_NAMES = new Set([
+  'afghanistan', 'albania', 'algeria', 'andorra', 'angola', 'argentina', 'armenia', 'australia',
+  'austria', 'azerbaijan', 'bahamas', 'bahrain', 'bangladesh', 'barbados', 'belarus', 'belgium',
+  'belize', 'benin', 'bhutan', 'bolivia', 'bosnia', 'bosnia and herzegovina', 'botswana', 'brazil',
+  'brunei', 'bulgaria', 'burkina faso', 'burundi', 'cambodia', 'cameroon', 'canada',
+  'cape verde', 'chad', 'chile', 'china', 'colombia', 'costa rica', 'croatia', 'cuba', 'cyprus',
+  'czech republic', 'czechia', 'denmark', 'djibouti', 'dominica', 'dominican republic', 'ecuador',
+  'egypt', 'el salvador', 'england', 'estonia', 'eswatini', 'ethiopia', 'fiji', 'finland', 'france',
+  'gabon', 'gambia', 'georgia', 'germany', 'ghana', 'greece', 'greenland', 'grenada', 'guatemala',
+  'guinea', 'guyana', 'haiti', 'honduras', 'hong kong', 'hungary', 'iceland', 'india', 'indonesia',
+  'iran', 'iraq', 'ireland', 'israel', 'italy', 'jamaica', 'japan', 'jordan', 'kazakhstan', 'kenya',
+  'kosovo', 'kuwait', 'kyrgyzstan', 'laos', 'latvia', 'lebanon', 'lesotho', 'liberia', 'libya',
+  'liechtenstein', 'lithuania', 'luxembourg', 'macau', 'madagascar', 'malawi', 'malaysia',
+  'maldives', 'mali', 'malta', 'mauritania', 'mauritius', 'mexico', 'moldova', 'monaco',
+  'mongolia', 'montenegro', 'morocco', 'mozambique', 'myanmar', 'namibia', 'nepal', 'netherlands',
+  'new zealand', 'nicaragua', 'niger', 'nigeria', 'north korea', 'north macedonia', 'norway',
+  'oman', 'pakistan', 'palestine', 'panama', 'papua new guinea', 'paraguay', 'peru', 'philippines',
+  'poland', 'portugal', 'qatar', 'romania', 'russia', 'rwanda', 'saudi arabia', 'scotland',
+  'senegal', 'serbia', 'seychelles', 'sierra leone', 'singapore', 'slovakia', 'slovenia',
+  'somalia', 'south africa', 'south korea', 'spain', 'sri lanka', 'sudan', 'suriname', 'sweden',
+  'switzerland', 'syria', 'taiwan', 'tajikistan', 'tanzania', 'thailand', 'timor-leste', 'togo',
+  'trinidad and tobago', 'tunisia', 'turkey', 'turkmenistan', 'uganda', 'ukraine',
+  'united arab emirates', 'uae', 'united kingdom', 'uk', 'united states', 'united states of america',
+  'usa', 'u.s.a.', 'uruguay', 'uzbekistan', 'vanuatu', 'vatican city', 'venezuela', 'vietnam',
+  'wales', 'yemen', 'zambia', 'zimbabwe',
+]);
+
+function looksLikeLocationLine(line) {
+  if (!line || line.length > 60) return false;
+  const trimmed = line.trim().toLowerCase();
+  if (COUNTRY_NAMES.has(trimmed)) return true;
+  const comma = trimmed.lastIndexOf(',');
+  return comma !== -1 && COUNTRY_NAMES.has(trimmed.slice(comma + 1).trim());
+}
 
 function looksLikeAddress(line) {
   return /\d/.test(line) && line.length < 120 && (line.includes(',') || /\b(street|st\.|road|rd\.|ave|avenue)\b/i.test(line));
@@ -195,34 +246,77 @@ function looksLikePhone(line) {
   return /^[+(]?[\d\s().+-]{7,20}$/.test(line.trim());
 }
 
+// NOTE: an earlier version of this function also tried recognizing a "Name\nCity, Country\n..."
+// entry with no category tag at all (e.g. "Bukchon Hanok Village / Seoul, South Korea / Steeped
+// in history…"), on the theory that a short, punctuation-free, digit-free line after a name is
+// probably a location. Tested directly against real exports, it was **far** too permissive — it
+// roughly tripled place counts on every sample, almost all noise (e.g. "Difficulty" + "Easy to
+// Moderate" turning into a fake place, or the guide's own title + location line at the very top
+// becoming one). Reverted. The handful of no-category entries it would have recovered aren't
+// worth that trade-off — they're simply missed by the static fallback, same as before.
 function extractPlacesStatically(text) {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   const places = [];
   let dayNumber = null;
+  let pendingDayTitle = null;
+  let dayTitleAttachedFor;
   let i = 0;
   while (i < lines.length) {
     const dayMatch = lines[i].match(/^day\s+(\d+)\b/i);
-    if (dayMatch) { dayNumber = Number(dayMatch[1]); i++; continue; }
+    if (dayMatch) {
+      dayNumber = Number(dayMatch[1]);
+      i++;
+      pendingDayTitle = null; // don't let an earlier day's title leak into a day with none of its own
+      // A short theme line right after the day header ("gangnam day", "Traditinal day") is common
+      // too, and was previously just discarded — capture it as the day's title, but only when it
+      // isn't itself the start of a real place entry (so a day with no title in between doesn't
+      // lose its first place to this).
+      const titleCandidate = lines[i];
+      const candidateNext = lines[i + 1] || '';
+      const candidateIsPlaceStart = titleCandidate && titleCandidate.length > 1 && titleCandidate.length < 200
+        && (CATEGORY_WORDS.has(candidateNext.toLowerCase()) || looksLikeLocationLine(candidateNext));
+      if (titleCandidate && !/^day\s+\d+\b/i.test(titleCandidate) && !candidateIsPlaceStart) {
+        pendingDayTitle = titleCandidate.slice(0, 200);
+        i++;
+      }
+      continue;
+    }
 
-    const nextLower = (lines[i + 1] || '').toLowerCase();
-    const isPlaceStart = lines[i].length > 1 && lines[i].length < 200 && CATEGORY_WORDS.has(nextLower);
+    const nextLine = lines[i + 1] || '';
+    const nextIsCategory = CATEGORY_WORDS.has(nextLine.toLowerCase());
+    const nextIsLocation = !nextIsCategory && looksLikeLocationLine(nextLine);
+    const isPlaceStart = lines[i].length > 1 && lines[i].length < 200 && (nextIsCategory || nextIsLocation);
     if (isPlaceStart) {
       const name = lines[i];
-      const category = lines[i + 1];
+      // "Location"-type entries (see looksLikeLocationLine above) never print an actual category
+      // word — leave category unset rather than storing the region/country line as if it were one.
+      const category = nextIsCategory ? nextLine : null;
       let j = i + 2;
-      let address = null;
-      if (lines[j] && looksLikeAddress(lines[j])) { address = lines[j]; j++; }
+      let address = nextIsLocation ? nextLine : null;
+      if (lines[j] && looksLikeAddress(lines[j])) { address = lines[j]; j++; } // a fuller address line overrides the bare region/country line
       if (lines[j] && looksLikePhone(lines[j])) j++; // skip phone numbers — no field for them
 
       const descLines = [];
       while (j < lines.length) {
         if (/^day\s+\d+\b/i.test(lines[j])) break;
-        if (lines[j].length < 200 && CATEGORY_WORDS.has((lines[j + 1] || '').toLowerCase())) break; // next place starts here
+        const boundaryNext = lines[j + 1] || '';
+        if (lines[j].length < 200 && (CATEGORY_WORDS.has(boundaryNext.toLowerCase()) || looksLikeLocationLine(boundaryNext))) break; // next place starts here
+        if (/^https?:\/\//i.test(lines[j])) {
+          // An affiliate/booking link, almost always preceded by its own CTA label line (e.g.
+          // "Huangpu River Cruise - Tickets") rather than a real sentence — drop both rather than
+          // let them pollute the stored description; a real sentence ending in . ! or ? is left alone.
+          const last = descLines[descLines.length - 1];
+          if (last && !/[.!?]$/.test(last)) descLines.pop();
+          j++;
+          continue;
+        }
         descLines.push(lines[j]);
         j++;
         if (descLines.join(' ').length > 1500) break; // safety cap on a single runaway entry
       }
-      places.push({ name, category, address, description: descLines.join(' ').trim() || null, dayNumber });
+      const dayTitle = dayNumber != null && dayNumber !== dayTitleAttachedFor ? pendingDayTitle : null;
+      if (dayNumber != null) dayTitleAttachedFor = dayNumber;
+      places.push({ name, category, address, description: descLines.join(' ').trim() || null, dayNumber, dayTitle });
       i = j;
       if (places.length >= 300) break; // sanity cap against pathological input
       continue;
@@ -247,6 +341,10 @@ function sanitizePdfPlace(raw) {
     description: raw.description ? String(raw.description).trim().slice(0, 2000) : null,
     tips: parseTips(raw.tips),
     dayNumber: Number.isInteger(dayNumber) && dayNumber > 0 && dayNumber <= 366 ? dayNumber : null,
+    // Only ever set by the static parser (a day's theme line, e.g. "gangnam day") — AI-extracted
+    // places never carry this, since PDF_PLACE_SCHEMA has no such field. insertPdfPlaceBlocks
+    // reads it off whichever place is first for a given day to title that day's block.
+    dayTitle: raw.dayTitle ? String(raw.dayTitle).trim().slice(0, 200) : null,
   };
 }
 
@@ -422,7 +520,7 @@ async function insertPdfPlaceBlocks(ctx, guideId, places, startPos, carryDay) {
     if (p.dayNumber != null && p.dayNumber !== lastDay) {
       ops.push({
         sql: 'INSERT INTO guide_blocks (guide_id, type, position, data) VALUES (?, ?, ?, ?)',
-        args: [guideId, 'day', pos++, JSON.stringify({ dayNumber: p.dayNumber, title: null })],
+        args: [guideId, 'day', pos++, JSON.stringify({ dayNumber: p.dayNumber, title: p.dayTitle || null })],
       });
       lastDay = p.dayNumber;
       dayBlocksInserted++;
@@ -447,6 +545,35 @@ async function insertPdfPlaceBlocks(ctx, guideId, places, startPos, carryDay) {
     }
   }
   return { pos, lastDay: lastDay != null ? lastDay : null, dayBlocksInserted, placesInserted };
+}
+
+// Shared by /guide/import-marketplace and its own /append call — validates each incoming block
+// exactly like every other creation path (untrusted external content, self-authored or not), and
+// silently skips anything that doesn't validate rather than failing the whole (possibly
+// multi-request) import over one bad entry. Capped defensively per call, same idea as the PDF
+// static parser's own sanity cap — a real total is chunked across several calls anyway.
+function validateMarketplaceBlocks(rawBlocksInput) {
+  const rawBlocks = Array.isArray(rawBlocksInput) ? rawBlocksInput.slice(0, 300) : [];
+  const validated = [];
+  for (const rb of rawBlocks) {
+    if (!rb || typeof rb !== 'object' || !BLOCK_TYPES.includes(rb.type)) continue;
+    const normalized = validateBlockData(rb.type, rb.data);
+    if (typeof normalized === 'string') continue;
+    validated.push({ type: rb.type, data: normalized });
+  }
+  return { validated, skipped: rawBlocks.length - validated.length };
+}
+
+async function insertMarketplaceBlocks(ctx, guideId, startPos, validated) {
+  const ops = validated.map((v, i) => ({
+    sql: 'INSERT INTO guide_blocks (guide_id, type, position, data) VALUES (?, ?, ?, ?)',
+    args: [guideId, v.type, startPos + i, JSON.stringify(v.data)],
+  }));
+  if (typeof ctx.db.tx === 'function') {
+    for (let i = 0; i < ops.length; i += 90) await ctx.db.tx(ops.slice(i, i + 90));
+  } else {
+    for (const op of ops) { await ctx.db.exec(op.sql, ...op.args); await sleep(RATE_LIMIT_GAP_MS); }
+  }
 }
 
 // Defensively read a place-like object coming back from ctx.collections.get() — the SDK
@@ -477,7 +604,13 @@ const HEADING_LEVELS = ['normal', 'medium', 'large'];
 const PLACE_CATEGORIES = ['Activity', 'Attraction', 'Bar/Cafe', 'Beach', 'Hotel', 'Nature', 'Other', 'Restaurant', 'Shopping', 'Transport'];
 const CATEGORY_KEYWORDS = [
   ['Hotel', ['hotel', 'hostel', 'guesthouse', 'guest house', 'apartment', 'accommodation', 'accomodation', 'lodging', 'resort', 'inn']],
-  ['Restaurant', ['restaurant', 'food', 'dining', 'eatery', 'bakery']],
+  ['Restaurant', [
+    'restaurant', 'food', 'dining', 'eatery', 'bakery', 'bistro', 'diner', 'dessert', 'brunch',
+    'steakhouse', 'pizza', 'sushi', 'noodles', 'bbq', 'seafood',
+    // Mindtrip-style exports tag restaurant entries with a cuisine/nationality word at least as
+    // often as the word "restaurant" itself (seen repeatedly: "Korean" as the whole category tag).
+    'korean', 'japanese', 'chinese', 'thai', 'italian', 'french', 'indian', 'vietnamese', 'mexican',
+  ]],
   ['Bar/Cafe', ['bar', 'cafe', 'café', 'pub', 'winery', 'brewery', 'coffee']],
   ['Beach', ['beach', 'coast', 'shore']],
   ['Nature', ['nature', 'natural', 'park', 'trail', 'forest', 'mountain', 'waterfall', 'lake', 'hiking', 'campsite', 'national park', 'wildlife', 'garden']],
@@ -507,11 +640,14 @@ function guideRow(row) {
     description: row.description,
     template: row.template || 'blank',
     status: row.status || 'draft',
+    featured: !!row.featured,
     placeCount: row.place_count || 0,
     days: row.day_count || null,
     coverPhoto: row.cover_photo || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    marketplaceId: row.marketplace_id || null,
+    marketplaceUpdatedAt: row.marketplace_updated_at || null,
   };
 }
 
@@ -600,13 +736,41 @@ function validateBlockData(type, raw) {
         lon: typeof d.lon === 'number' ? d.lon : null,
         rating: Number.isInteger(d.rating) ? d.rating : null,
         tips: parseTips(d.tips),
-        photoDataUri: d.photoDataUri || null,
+        // MAX_PHOTO_BYTES (1.5MB), not the much smaller MAX_UPLOAD_BYTES — a server-side
+        // OpenTripMap fetch (fetchPhotoDataUri) legitimately produces photos up to that size and
+        // never touches the browser's own request-body proxy at all, so its own cap is the right
+        // ceiling here. A manual upload is already compressed client-side well under 60KB before
+        // it ever gets here; this is just the defense-in-depth backstop, not the normal gate.
+        photoDataUri: (typeof d.photoDataUri === 'string' && d.photoDataUri.startsWith('data:image/') && dataUriByteSize(d.photoDataUri) <= MAX_PHOTO_BYTES)
+          ? d.photoDataUri : null,
         source: d.source || 'manual',
         xid: d.xid || null,
       };
     default:
       return `unknown block type "${type}"`;
   }
+}
+
+// Builds ctx.collections.savePlace()'s single input object — same defensive multi-key-variant
+// approach as placeCreateInput() below, and for the same reason: the real accepted field names
+// for a collection's own place shape aren't documented anywhere this plugin has found, and an
+// unrecognized key is silently dropped rather than erroring, so guessing wrong just means a
+// field quietly doesn't save rather than a visible failure. Sending every plausible name for the
+// ones that matter (title/name, notes/description, coordinates) costs nothing if only one of
+// each pair turns out to be real. collection_id must live INSIDE this same object — savePlace
+// takes one argument, not (collectionId, place); the mock host's savePlace(input) throws
+// "collection_id is required" otherwise, which is what a real host does too.
+function collectionPlaceInput(collectionId, p) {
+  const input = {
+    collection_id: collectionId, collectionId: collectionId,
+    name: p.name, title: p.name,
+    description: p.description || undefined, notes: p.description || undefined,
+    address: p.address || undefined,
+    category: p.category || undefined,
+  };
+  if (typeof p.lat === 'number') { input.lat = p.lat; input.latitude = p.lat; }
+  if (typeof p.lon === 'number') { input.lon = p.lon; input.lng = p.lon; input.longitude = p.lon; }
+  return input;
 }
 
 // Builds the ctx.places.create() input from a place/activity block's data — shared by the
@@ -738,6 +902,15 @@ module.exports = definePlugin({
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
     `);
+    await ctx.db.migrate('005_featured', `ALTER TABLE guides ADD COLUMN featured INTEGER NOT NULL DEFAULT 0;`);
+    // NULL on every guide except one imported from the marketplace — lets the marketplace UI
+    // show "already imported" (marketplace_id matches an index entry's id) and "update
+    // available" (the index entry's own updatedAt is newer than what's stored here) without a
+    // separate tracking table.
+    await ctx.db.migrate('006_marketplace_origin', `
+      ALTER TABLE guides ADD COLUMN marketplace_id TEXT;
+      ALTER TABLE guides ADD COLUMN marketplace_updated_at TEXT;
+    `);
 
     // One-time data migration: fold the old flat guide_places rows into the new block
     // model, so content created before this update isn't stranded. Guarded by a plain
@@ -781,7 +954,9 @@ module.exports = definePlugin({
       async handler(req, ctx) {
         const isAdmin = !!(req.user && req.user.isAdmin);
         const guides = await ctx.db.query(
-          isAdmin ? 'SELECT * FROM guides ORDER BY created_at DESC' : `SELECT * FROM guides WHERE status = 'published' ORDER BY created_at DESC`
+          isAdmin
+            ? 'SELECT * FROM guides ORDER BY featured DESC, created_at DESC'
+            : `SELECT * FROM guides WHERE status = 'published' ORDER BY featured DESC, created_at DESC`
         );
         if (!guides.length) return json(200, { guides: [] });
         const ids = guides.map((g) => g.id);
@@ -917,6 +1092,117 @@ module.exports = definePlugin({
         await ctx.db.exec('DELETE FROM guide_places WHERE guide_id = ?', id);
         await ctx.db.exec('DELETE FROM guides WHERE id = ?', id);
         return json(200, { deleted: true });
+      },
+    },
+    {
+      // Pin/unpin a guide to the top of the list — plain toggle, own db, no reason to route it
+      // through the general-purpose PUT /guide (which also handles template/day-count changes).
+      method: 'POST', path: '/guide/feature', auth: true,
+      async handler(req, ctx) {
+        const denied = requireAdmin(req); if (denied) return denied;
+        const b = req.body || {};
+        const id = Number(b.id);
+        if (!Number.isInteger(id)) return error(400, 'id is required');
+        const existing = await ctx.db.query('SELECT id FROM guides WHERE id = ?', id);
+        if (!existing.length) return error(404, 'Guide not found');
+        await ctx.db.exec(`UPDATE guides SET featured = ?, updated_at = datetime('now') WHERE id = ?`, b.featured ? 1 : 0, id);
+        const rows = await ctx.db.query('SELECT * FROM guides WHERE id = ?', id);
+        return json(200, { guide: guideRow(rows[0]) });
+      },
+    },
+    {
+      // Copies a guide's own fields (title suffixed so the two are distinguishable in the list)
+      // plus every block, in order — always lands as an unpublished, unfeatured draft regardless
+      // of the source guide's own status, so duplicating a live guide to tweak it never
+      // accidentally publishes the half-edited copy.
+      method: 'POST', path: '/guide/duplicate', auth: true,
+      async handler(req, ctx) {
+        const denied = requireAdmin(req); if (denied) return denied;
+        const id = Number(req.body && req.body.id);
+        if (!Number.isInteger(id)) return error(400, 'id is required');
+        const source = await ctx.db.query('SELECT * FROM guides WHERE id = ?', id);
+        if (!source.length) return error(404, 'Guide not found');
+        const src = source[0];
+
+        await ctx.db.exec(
+          'INSERT INTO guides (title, location, description, template) VALUES (?, ?, ?, ?)',
+          `${src.title} (Copy)`.slice(0, 200), src.location, src.description, src.template || 'blank'
+        );
+        const newGuideRows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
+        const newGuide = newGuideRows[0];
+
+        const blocks = await ctx.db.query('SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', id);
+        const ops = blocks.map((b) => ({
+          sql: 'INSERT INTO guide_blocks (guide_id, type, position, data) VALUES (?, ?, ?, ?)',
+          args: [newGuide.id, b.type, b.position, b.data],
+        }));
+        if (typeof ctx.db.tx === 'function') {
+          for (let i = 0; i < ops.length; i += 90) await ctx.db.tx(ops.slice(i, i + 90));
+        } else {
+          for (const op of ops) { await ctx.db.exec(op.sql, ...op.args); await sleep(RATE_LIMIT_GAP_MS); }
+        }
+
+        return json(201, { guide: guideRow(newGuide) });
+      },
+    },
+    {
+      // Installs a guide from the public marketplace — the client has already fetched the
+      // guide+blocks JSON straight from GitHub (a public repo, no auth, no server round-trip
+      // needed for that part); this route's only job is to validate it exactly like every other
+      // creation path (it's still untrusted, external content, self-authored or not) and create
+      // it locally. Always a fresh, unpublished, unfeatured draft, same as every other import.
+      //
+      // A marketplace guide can embed real photos (from the original PDF-import photo pass),
+      // easily pushing the full JSON well past the host's own request-body cap (~100KB,
+      // confirmed elsewhere in this plugin) in a single POST — a real 413 hit exactly this way.
+      // So, same fix as the PDF importer: the client sends blocks in size-bounded chunks: this
+      // call creates the guide with the first chunk, /guide/import-marketplace/append below
+      // adds every chunk after that onto the same guide.
+      method: 'POST', path: '/guide/import-marketplace', auth: true,
+      async handler(req, ctx) {
+        const denied = requireAdmin(req); if (denied) return denied;
+        const b = req.body || {};
+        const src = b.guide && typeof b.guide === 'object' ? b.guide : null;
+        const title = src && src.title ? String(src.title).trim().slice(0, 200) : '';
+        if (!title) return error(400, 'That marketplace guide is missing a title');
+        const template = TEMPLATES.includes(src.template) ? src.template : 'blank';
+        const location = src.location ? String(src.location).trim().slice(0, 200) : null;
+        const description = src.description ? String(src.description).trim().slice(0, 2000) : null;
+        // Both optional — the client sends the index entry's own id/updatedAt so "already
+        // imported" and "update available" can be shown next time without a separate table.
+        const marketplaceId = b.marketplaceId ? String(b.marketplaceId).trim().slice(0, 200) : null;
+        const marketplaceUpdatedAt = b.marketplaceUpdatedAt ? String(b.marketplaceUpdatedAt).trim().slice(0, 40) : null;
+
+        await ctx.db.exec(
+          'INSERT INTO guides (title, location, description, template, marketplace_id, marketplace_updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+          title, location, description, template, marketplaceId, marketplaceUpdatedAt
+        );
+        const newGuideRows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
+        const newGuide = newGuideRows[0];
+
+        const { validated, skipped } = validateMarketplaceBlocks(b.blocks);
+        await insertMarketplaceBlocks(ctx, newGuide.id, 0, validated);
+
+        return json(201, { guide: guideRow(newGuide), blockCount: validated.length, skipped });
+      },
+    },
+    {
+      // Continues a chunked marketplace import onto the guide the call above already created —
+      // same validation, appended after the guide's existing blocks. Never creates a new guide.
+      method: 'POST', path: '/guide/import-marketplace/append', auth: true,
+      async handler(req, ctx) {
+        const denied = requireAdmin(req); if (denied) return denied;
+        const b = req.body || {};
+        const guideId = Number(b.guideId);
+        if (!Number.isInteger(guideId)) return error(400, 'guideId is required');
+        const existing = await ctx.db.query('SELECT id FROM guides WHERE id = ?', guideId);
+        if (!existing.length) return error(404, 'Guide not found');
+
+        const { validated, skipped } = validateMarketplaceBlocks(b.blocks);
+        const startPos = await nextPosition(ctx, guideId);
+        await insertMarketplaceBlocks(ctx, guideId, startPos, validated);
+
+        return json(200, { blockCount: validated.length, skipped });
       },
     },
 
@@ -1233,6 +1519,59 @@ module.exports = definePlugin({
       },
     },
     {
+      // Traveler-facing — unlike the admin-only Collections routes here (which curate a GUIDE's
+      // own content), this pulls every Place in a guide into the ACTING USER's own personal
+      // Collection, new or existing: the reverse direction of "from a collection" below.
+      // ctx.collections isn't the plugin's own db, so its calls can't be batched via ctx.db.tx —
+      // same per-call pacing as /guide/plan-trip, against the same host RPC rate limit.
+      method: 'POST', path: '/guide/export-to-collection', auth: true,
+      async handler(req, ctx) {
+        const b = req.body || {};
+        const guideId = Number(b.guideId);
+        if (!Number.isInteger(guideId)) return error(400, 'guideId is required');
+        if (!ctx.collections) return error(400, "This TREK instance doesn't support Collections yet — try updating TREK.");
+        const collectionIdInput = Number.isInteger(Number(b.collectionId)) && b.collectionId != null ? Number(b.collectionId) : null;
+        const newCollectionName = b.newCollectionName ? String(b.newCollectionName).trim().slice(0, 200) : '';
+        if (!collectionIdInput && !newCollectionName) return error(400, 'Pick an existing collection or name a new one');
+
+        const guideRows = await ctx.db.query('SELECT * FROM guides WHERE id = ?', guideId);
+        if (!guideRows.length) return error(404, 'Guide not found');
+        const isAdmin = !!(req.user && req.user.isAdmin);
+        if (guideRows[0].status !== 'published' && !isAdmin) return error(404, 'Guide not found');
+
+        let collectionId = collectionIdInput;
+        try {
+          if (!collectionId) {
+            const created = await ctx.collections.create({ name: newCollectionName, title: newCollectionName });
+            collectionId = created && created.id;
+            if (!collectionId) throw new Error("Could not read back the new collection's id");
+          }
+        } catch (e) {
+          const message = String(e && e.message || e);
+          if (message.startsWith('RESOURCE_FORBIDDEN')) return error(400, 'The Collections addon is not enabled on this TREK instance.');
+          if (message.startsWith('PERMISSION_DENIED')) return error(400, 'This plugin needs the "db:write:collections" permission re-approved — reinstall or update the plugin in Admin → Plugins to grant it.');
+          return error(502, 'Could not create that collection: ' + message);
+        }
+
+        const blocks = (await ctx.db.query('SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', guideId)).map(blockRow);
+        const places = blocks.filter((bl) => bl.type === 'place').map((bl) => bl.data);
+
+        let saved = 0, failed = 0;
+        for (const p of places) {
+          try {
+            await ctx.collections.savePlace(collectionPlaceInput(collectionId, p));
+            saved++;
+          } catch (e) {
+            ctx.log.error('export-to-collection: savePlace failed', { message: e && e.message });
+            failed++;
+          }
+          await sleep(RATE_LIMIT_GAP_MS);
+        }
+
+        return json(201, { collectionId, saved, failed, total: places.length });
+      },
+    },
+    {
       method: 'POST', path: '/guide/blocks/from-collection', auth: true,
       async handler(req, ctx) {
         const denied = requireAdmin(req); if (denied) return denied;
@@ -1307,6 +1646,46 @@ module.exports = definePlugin({
           if (message.startsWith('BAD_PARAMS')) return error(400, 'That place could not be added as-is.');
           return error(502, 'Could not add the place to the trip.');
         }
+      },
+    },
+    {
+      // Single-place counterpart to /guide/export-to-collection — the "Save" button next to
+      // "Add to trip" on an individual place/activity card, same draft-visibility rule as
+      // /guide/blocks/add-to-trip above (block ids are sequential across every guide).
+      method: 'POST', path: '/guide/blocks/save-to-collection', auth: true,
+      async handler(req, ctx) {
+        const b = req.body || {};
+        const blockId = Number(b.blockId);
+        if (!Number.isInteger(blockId)) return error(400, 'blockId is required');
+        if (!ctx.collections) return error(400, "This TREK instance doesn't support Collections yet — try updating TREK.");
+        const collectionIdInput = Number.isInteger(Number(b.collectionId)) && b.collectionId != null ? Number(b.collectionId) : null;
+        const newCollectionName = b.newCollectionName ? String(b.newCollectionName).trim().slice(0, 200) : '';
+        if (!collectionIdInput && !newCollectionName) return error(400, 'Pick an existing collection or name a new one');
+
+        const rows = await ctx.db.query('SELECT * FROM guide_blocks WHERE id = ?', blockId);
+        if (!rows.length) return error(404, 'Block not found');
+        const block = blockRow(rows[0]);
+        if (block.type !== 'place' && block.type !== 'activity') return error(400, 'Only a place or activity can be saved to a collection');
+        const guideRows = await ctx.db.query('SELECT status FROM guides WHERE id = ?', block.guideId);
+        const isAdmin = !!(req.user && req.user.isAdmin);
+        if (!guideRows.length || (guideRows[0].status !== 'published' && !isAdmin)) return error(404, 'Block not found');
+
+        let collectionId = collectionIdInput;
+        try {
+          if (!collectionId) {
+            const created = await ctx.collections.create({ name: newCollectionName, title: newCollectionName });
+            collectionId = created && created.id;
+            if (!collectionId) throw new Error("Could not read back the new collection's id");
+          }
+          await ctx.collections.savePlace(collectionPlaceInput(collectionId, block.data));
+        } catch (e) {
+          const message = String(e && e.message || e);
+          if (message.startsWith('RESOURCE_FORBIDDEN')) return error(400, 'The Collections addon is not enabled on this TREK instance.');
+          if (message.startsWith('PERMISSION_DENIED')) return error(400, 'This plugin needs the "db:write:collections" permission re-approved — reinstall or update the plugin in Admin → Plugins to grant it.');
+          return error(502, 'Could not save that place: ' + message);
+        }
+
+        return json(201, { collectionId, saved: true });
       },
     },
     {

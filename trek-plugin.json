@@ -1,7 +1,7 @@
 {
   "id": "featured-guides",
   "name": "Featured Guides",
-  "version": "1.10.3",
+  "version": "1.16.0",
   "apiVersion": 1,
   "author": "raduwolf12",
   "description": "Curated destination guides enriched with real places to explore, with one-tap add straight into your trip.",
@@ -13,9 +13,11 @@
     "http:outbound",
     "http:outbound:*.opentripmap.com",
     "http:outbound:nominatim.openstreetmap.org",
+    "http:outbound:raw.githubusercontent.com",
     "db:read:trips",
     "db:write:places",
     "db:read:collections",
+    "db:write:collections",
     "db:create:trips",
     "db:write:days",
     "db:write:itinerary",
@@ -26,7 +28,8 @@
   "icon": "Compass",
   "egress": [
     "*.opentripmap.com",
-    "nominatim.openstreetmap.org"
+    "nominatim.openstreetmap.org",
+    "raw.githubusercontent.com"
   ],
   "settings": [
     {

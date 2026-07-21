@@ -713,7 +713,13 @@ body.trek-ui {
     .hero p { font-size: 13px; opacity: 0.95; max-width: 640px; line-height: 1.5; margin: 0; }
     .hero-shade { position: absolute; inset: 0; z-index: 0; background: linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.6) 100%); }
     .hero-content { position: relative; z-index: 1; }
-    .back-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; justify-content: space-between; }
+    .back-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; justify-content: space-between; flex-wrap: wrap; }
+    .back-row-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+    .preview-banner {
+      display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+      color: var(--info); background: var(--info-soft); padding: 6px 12px; border-radius: 999px;
+    }
+    .preview-banner svg { width: 14px; height: 14px; }
 
     .timeline-nav {
       position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; overflow-x: auto; padding: 10px 0 12px;
@@ -752,7 +758,7 @@ body.trek-ui {
     .place-body .name { font-size: 14px; font-weight: 600; margin: 0; }
     .place-body .desc { font-size: 13px; color: var(--text-secondary); margin: 6px 0 0; line-height: 1.5; }
     .place-body .tips { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-muted); }
-    .place-actions { display: flex; align-items: flex-start; }
+    .place-actions { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
 
     .block-heading { font-weight: 700; margin: 22px 0 10px; color: var(--text-primary); }
     .block-heading--large { font-size: 22px; }
@@ -800,6 +806,21 @@ body.trek-ui {
     .admin-guide-row { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border-faint);
       border-radius: var(--radius-md); margin-bottom: 8px; background: var(--bg-card); }
     .admin-guide-row .title { flex: 1; font-size: 14px; font-weight: 600; }
+    .market-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border-faint);
+      border-radius: var(--radius-md); margin-bottom: 8px; background: var(--bg-card); }
+    .market-row .market-info { flex: 1; min-width: 0; }
+    .market-row .title { font-size: 14px; font-weight: 600; margin: 0; }
+    .market-row .loc { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+    .market-row .desc { font-size: 12px; color: var(--text-secondary); margin: 4px 0; }
+    .market-row .market-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .market-thumb { width: 48px; height: 48px; border-radius: var(--radius-sm); object-fit: cover; flex-shrink: 0; }
+    .market-thumb--placeholder { display: flex; align-items: center; justify-content: center; background: var(--bg-hover); color: var(--text-faint); }
+    .market-thumb--placeholder svg { width: 20px; height: 20px; }
+    .market-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; flex-shrink: 0; }
+    .market-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+    .market-badge--imported { color: var(--text-muted); background: var(--bg-hover); }
+    .market-badge--update { color: var(--warning); background: var(--warning-soft); }
+    .market-bulk-row { display: flex; align-items: center; gap: 10px; margin: 4px 0 12px; }
     .search-result { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border-faint); }
     .search-result:last-child { border-bottom: none; }
     .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
@@ -831,12 +852,48 @@ body.trek-ui {
     .block-row .block-preview { flex: 1; min-width: 0; }
     .block-row .block-type-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-faint); margin-bottom: 4px; }
     .block-row .block-actions { display: flex; gap: 6px; flex-shrink: 0; }
-    .add-item-row { display: flex; gap: 8px; align-items: center; margin: 14px 0; }
-    /* The design kit replaces a native <select> with a sibling-wrapping .trek-select-wrap
-       (moving the original, now-hidden <select> inside it) — so sizing has to target the
-       wrap, not the (no longer laid-out) select, or the trigger + its dropdown menu both
-       shrink to fit their own content and end up cramped with internal scrollbars. */
-    .add-item-row select, .add-item-row .trek-select-wrap { flex: 1; min-width: 0; }
+    /* A Day block reads as a section header — a subtly tinted band — rather than looking
+       identical to every place/text row under it, and everything until the next Day gets a
+       slight indent, so a long itinerary scans as day-grouped sections instead of one flat,
+       undifferentiated list. */
+    .block-row--day { background: var(--accent-subtle); border-color: var(--border-primary); }
+    .block-row--day .block-preview { font-weight: 600; }
+    .block-row--indented { margin-left: 20px; }
+
+    /* A calm, icon-only action button — a filled solid-red delete button on every single row of
+       a long content list reads as a wall of warnings rather than a list of content. Same idea
+       at rest as the secondary button; only the destructive one tints on hover, so its danger is
+       discoverable without dominating the page by default. */
+    .icon-btn {
+      display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+      width: 34px; height: 34px; border-radius: var(--radius-sm); border: 1px solid var(--border-faint);
+      background: var(--bg-card); color: var(--text-secondary); cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .icon-btn:hover { background: var(--bg-hover); }
+    .icon-btn--danger { color: var(--danger); }
+    .icon-btn--danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+    .icon-btn--featured { color: var(--warning); background: var(--warning-soft); border-color: var(--warning); }
+    .icon-btn--featured svg { fill: currentColor; }
+
+    /* Bottom-right of the cover — top-left already holds the place/day count (.cover-badge) and
+       top-right the admin-only Draft indicator (.draft-badge); a featured guide can be a draft
+       too, so this needs its own corner rather than fighting either for the same spot. */
+    .featured-badge {
+      position: absolute; bottom: 8px; right: 8px; display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #fff;
+      background: rgba(217,119,6,0.85); padding: 3px 8px; border-radius: 999px;
+    }
+    .featured-badge svg { width: 11px; height: 11px; fill: currentColor; }
+
+    .add-item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; margin: 14px 0; }
+    .add-item-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px;
+      border: 1px solid var(--border-faint); border-radius: var(--radius-md); background: var(--bg-card);
+      cursor: pointer; font-size: 11px; font-weight: 600; color: var(--text-secondary); text-align: center;
+    }
+    .add-item-btn:hover { background: var(--bg-hover); border-color: var(--border-primary); }
+    .add-item-btn svg { width: 18px; height: 18px; color: var(--text-secondary); }
     .trek-select-trigger { width: 100%; }
     .cat-chip {
       display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px;
@@ -878,6 +935,11 @@ body.trek-ui {
     heading: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16M18 4v16M6 12h12"/></svg>',
     body: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
     upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>',
+    copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+    eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>',
+    store: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1.5-5h15L21 9"/><path d="M3 9v10a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V9"/><path d="M3 9h18"/><path d="M9 21v-6h6v6"/></svg>',
+    download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
+    bookmark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
   };
   // Fixed place-category taxonomy with matching accent colours — imported categories (from
   // OpenTripMap, a PDF, or AI extraction) get bucketed into one of these server-side, so this
@@ -904,19 +966,22 @@ body.trek-ui {
     { key: 'list', label: 'List', icon: 'list' },
     { key: 'itinerary', label: 'Itinerary', icon: 'briefcase' },
   ];
+  // Ordered by how often a real guide actually uses each one — Place/Activity/Day first (the
+  // things every itinerary is mostly made of), general text & media after, the rarer Guide
+  // embed last — rather than the previous arbitrary order, which buried Place at the very end.
   var BLOCK_MENU = [
-    { type: 'quote', label: 'Quote', icon: 'quote' },
+    { type: 'place', label: 'Place', icon: 'pin' },
+    { type: 'activity', label: 'Activity', icon: 'star' },
     { type: 'day', label: 'Day', icon: 'briefcase' },
-    { type: 'guide', label: 'Guide', icon: 'compass' },
+    { type: 'heading', level: 'normal', label: 'Heading', icon: 'heading' },
+    { type: 'body', label: 'Body text', icon: 'body' },
+    { type: 'quote', label: 'Quote', icon: 'quote' },
     { type: 'image', label: 'Image', icon: 'image' },
     { type: 'link', label: 'Link', icon: 'link' },
     { type: 'divider', label: 'Divider', icon: 'divider' },
-    { type: 'heading', level: 'normal', label: 'Normal heading', icon: 'heading' },
     { type: 'heading', level: 'medium', label: 'Medium heading', icon: 'heading' },
     { type: 'heading', level: 'large', label: 'Large heading', icon: 'heading' },
-    { type: 'body', label: 'Body text', icon: 'body' },
-    { type: 'activity', label: 'Activity', icon: 'star' },
-    { type: 'place', label: 'Place', icon: 'pin' },
+    { type: 'guide', label: 'Guide', icon: 'compass' },
   ];
   var GRADIENTS = [
     ['#2b5876', '#4e4376'], ['#1f4037', '#99f2c8'], ['#654ea3', '#eaafc8'],
@@ -967,8 +1032,13 @@ body.trek-ui {
   }
 
   var state = {
-    view: 'list', guides: [], guide: null, blocks: [], trips: null, isAdmin: false, ctx: null, search: '',
+    view: 'list', guides: [], guide: null, blocks: [], trips: null, isAdmin: false, ctx: null, search: '', adminSearch: '',
   };
+  // Persists across renderAdmin() re-renders in this session — the "Configure your guide" form
+  // used to always render fully expanded, even for an admin who already has a dozen guides and
+  // just wants to find one to edit. Collapsed behind a "+ New guide" button once at least one
+  // guide exists; still shown open by default the very first time, when there's nothing to manage yet.
+  var adminCreateFormOpen = false;
 
   var pageTitle = document.getElementById('pageTitle');
   var adminToggleEl = document.getElementById('adminToggle');
@@ -1120,6 +1190,24 @@ body.trek-ui {
     return lines.join('\n');
   }
 
+  // Two cleanups on the fully-assembled text, before it's chunked or sent anywhere — done once
+  // here rather than per-chunk server-side, since both patterns can straddle a chunk boundary:
+  //  1. Collapse runs of 2+ spaces/tabs to one. Justified-body-text paragraphs and, separately,
+  //     a CJK glyph pdf.js has no Unicode mapping for (common in these exports — Korean/Chinese
+  //     text disappears entirely but the glyph's width still leaves a gap) both show up as long
+  //     runs of spaces; harmless to collapse since a real single space is left untouched.
+  //  2. Cut everything from a standalone "Map" line onward. Every real Mindtrip export ends the
+  //     actual content with a "Map" section — a legend that just repeats place names already
+  //     seen (plus a "Showing N of M places" line and the export date) — pure noise for import
+  //     purposes that only eats into the AI's char budget for no benefit.
+  function cleanExtractedPdfText(text) {
+    var collapsed = text.replace(/[ \t]{2,}/g, ' ');
+    var lines = collapsed.split('\n');
+    var mapIdx = lines.findIndex(function (l) { return l.trim().toLowerCase() === 'map'; });
+    if (mapIdx !== -1) collapsed = lines.slice(0, mapIdx).join('\n');
+    return collapsed.trim();
+  }
+
   function extractPdfText(file) {
     return loadPdfJs().then(function (pdfjsLib) {
       return file.arrayBuffer().then(function (buf) {
@@ -1135,7 +1223,7 @@ body.trek-ui {
           });
         });
       }, Promise.resolve(''));
-    });
+    }).then(cleanExtractedPdfText);
   }
 
   // Multiplies two PDF content-stream matrices (a * b, "b" applied first) to track the current
@@ -1435,6 +1523,457 @@ body.trek-ui {
     return { chunks: chunks, truncated: i < text.length };
   }
 
+  // ---------------- Marketplace ----------------
+  // A curated set of ready-made guides, published as plain JSON in a public GitHub repo — not
+  // fetched through the plugin's own server, since raw.githubusercontent.com is a public,
+  // CORS-permissive host the sandboxed iframe can reach directly (confirmed: unlike the plugin's
+  // own same-origin static assets, which hit a Cross-Origin-Resource-Policy block from the
+  // opaque sandbox origin, an external host that itself sets Cross-Origin-Resource-Policy:
+  // cross-origin has no such problem). index.json is small and lists what's available; each
+  // entry's own file is only fetched when actually imported.
+  var MARKETPLACE_BASE = 'https://raw.githubusercontent.com/raduwolf12/featured-guides/main/marketplace/';
+  var MARKETPLACE_INDEX_URL = MARKETPLACE_BASE + 'index.json';
+
+  // Splits a guide's blocks into pieces no bigger than maxBytes (measured as serialized JSON —
+  // a close enough proxy for the wire size that actually crosses the host's request-body proxy)
+  // rather than by a fixed count — a marketplace guide can carry real embedded photos from the
+  // original PDF import, so a handful of blocks can already be as big as a hundred plain-text
+  // ones. A single block bigger than maxBytes on its own still gets its own chunk rather than
+  // being dropped — the request might still fail, but that's the server's call, not silently lost
+  // here.
+  var MARKETPLACE_CHUNK_BYTES = 70_000;
+  function chunkBlocksBySize(blocks, maxBytes) {
+    var chunks = [];
+    var current = [];
+    var currentSize = 0;
+    blocks.forEach(function (b) {
+      var size = JSON.stringify(b).length;
+      if (current.length && currentSize + size > maxBytes) {
+        chunks.push(current);
+        current = [];
+        currentSize = 0;
+      }
+      current.push(b);
+      currentSize += size;
+    });
+    if (current.length) chunks.push(current);
+    return chunks;
+  }
+
+  function marketplaceEntryKey(e) { return e.id != null ? String(e.id) : e.file; }
+
+  // Only requires title + file — everything else (photo, author, dates) is optional decoration.
+  // One malformed entry (a typo, a bad merge, a future contributor's PR) used to take down the
+  // *entire* marketplace list; now it's just quietly skipped and logged, same as the static PDF
+  // parser already does for one bad extracted place rather than failing the whole import.
+  function isValidMarketplaceEntry(e) {
+    return !!(e && typeof e === 'object' && e.title && e.file);
+  }
+
+  // Cross-references an index entry against guides already imported into this instance (matched
+  // by the marketplace id stamped on import) to tell "already imported" and "update available"
+  // apart — an update is never applied in place (that would clobber any edits already made to
+  // the local copy); it's just a second, separate import of the newer version.
+  function marketplaceEntryState(e) {
+    var key = e.id != null ? e.id : null;
+    var existing = key != null ? (state.guides || []).find(function (g) { return g.marketplaceId === key; }) : null;
+    if (!existing) return { imported: false, needsUpdate: false, existing: null };
+    // A guide imported before this instance's copy had a marketplaceUpdatedAt to store (an
+    // earlier index.json with no updatedAt field yet, or an older plugin version) stores it as
+    // null — treat that as "unknown, assume outdated" rather than requiring both sides to be
+    // present, or a real update on the index side would never be noticed for exactly the guides
+    // that have been sitting around longest.
+    var needsUpdate = !!(e.updatedAt && String(e.updatedAt) > String(existing.marketplaceUpdatedAt || ''));
+    return { imported: true, needsUpdate: needsUpdate, existing: existing };
+  }
+
+  function fetchAndImportGuide(entry, onProgress) {
+    return fetch(MARKETPLACE_BASE + entry.file)
+      .then(function (res) {
+        if (!res.ok) throw new Error('Could not fetch "' + (entry.title || entry.file) + '" from the marketplace.');
+        return res.json();
+      })
+      .then(function (payload) {
+        var blocks = Array.isArray(payload.blocks) ? payload.blocks : [];
+        var chunks = chunkBlocksBySize(blocks, MARKETPLACE_CHUNK_BYTES);
+        if (!chunks.length) chunks = [[]]; // still create the guide even with no content
+        var guideId = null;
+        return chunks.reduce(function (chain, chunk, idx) {
+          return chain.then(function () {
+            if (onProgress) onProgress(idx + 1, chunks.length);
+            var call = idx === 0
+              ? invokeWithRateLimitRetry('/guide/import-marketplace', {
+                  method: 'POST',
+                  body: { guide: payload.guide, blocks: chunk, marketplaceId: entry.id || null, marketplaceUpdatedAt: entry.updatedAt || null },
+                })
+              : invokeWithRateLimitRetry('/guide/import-marketplace/append', { method: 'POST', body: { guideId: guideId, blocks: chunk } });
+            return call.then(function (d) { if (idx === 0) guideId = d.guide.id; });
+          });
+        }, Promise.resolve()).then(function () { return guideId; });
+      });
+  }
+
+  function openMarketplaceModal() {
+    modalRoot.innerHTML =
+      '<div class="modal-backdrop" id="backdrop"><div class="modal" style="max-width:680px">' +
+        '<h3>' + ICONS.store + ' Guide marketplace</h3>' +
+        '<p class="trek-muted" style="margin:0 0 14px">' +
+          'Ready-made guides you can pull straight into your own library. Each one lands as a ' +
+          '<strong>Draft</strong> for you to review, edit, and Publish.' +
+        '</p>' +
+        '<div id="marketplaceFilterRow" class="trek-row" style="gap:8px;margin-bottom:0"></div>' +
+        '<div id="marketplaceBulkRow"></div>' +
+        '<div id="marketplaceList">Loading…</div>' +
+        '<div class="trek-row" style="margin-top:14px;justify-content:flex-end">' +
+          '<button class="trek-btn trek-btn--secondary" id="bfCancel" type="button">Close</button>' +
+        '</div>' +
+      '</div></div>';
+    document.getElementById('backdrop').addEventListener('click', function (e) { if (e.target.id === 'backdrop') closeModal(); });
+    document.getElementById('bfCancel').addEventListener('click', closeModal);
+
+    var listEl = document.getElementById('marketplaceList');
+    var allEntries = [];
+    var marketSearch = '';
+    var marketLocation = '';
+    var selectedKeys = {};
+
+    function visibleEntries() {
+      var q = marketSearch.trim().toLowerCase();
+      return allEntries.filter(function (e) {
+        if (marketLocation && e.location !== marketLocation) return false;
+        if (q && (e.title + ' ' + (e.location || '')).toLowerCase().indexOf(q) === -1) return false;
+        return true;
+      });
+    }
+
+    function updateBulkRow() {
+      var count = Object.keys(selectedKeys).filter(function (k) { return selectedKeys[k]; }).length;
+      var btn = document.getElementById('marketImportSelected');
+      if (btn) { btn.textContent = 'Import selected (' + count + ')'; btn.disabled = count === 0; }
+      var selectAll = document.getElementById('marketSelectAll');
+      if (selectAll) {
+        var visible = visibleEntries();
+        selectAll.checked = visible.length > 0 && visible.every(function (e) { return selectedKeys[marketplaceEntryKey(e)]; });
+      }
+    }
+
+    function renderMarketList() {
+      var entries = visibleEntries();
+      if (!entries.length) {
+        listEl.innerHTML = '<div class="trek-muted">No guides match your search.</div>';
+        return;
+      }
+      listEl.innerHTML = entries.map(function (e) {
+        var key = marketplaceEntryKey(e);
+        var badge = e.days
+          ? (e.days + (e.days === 1 ? ' day' : ' days'))
+          : (e.placeCount != null ? e.placeCount + (e.placeCount === 1 ? ' place' : ' places') : '');
+        var st = marketplaceEntryState(e);
+        var statusBadge = st.needsUpdate
+          ? '<span class="market-badge market-badge--update">Update available</span>'
+          : (st.imported ? '<span class="market-badge market-badge--imported">Already imported</span>' : '');
+        var buttonLabel = st.needsUpdate ? 'Update' : (st.imported ? 'Import again' : 'Import');
+        var thumb = e.coverPhoto
+          ? '<img class="market-thumb" src="' + esc(e.coverPhoto) + '" alt="" />'
+          : '<div class="market-thumb market-thumb--placeholder">' + ICONS.compass + '</div>';
+        return '<div class="market-row">' +
+          '<input type="checkbox" class="market-select" data-select-key="' + esc(key) + '"' + (selectedKeys[key] ? ' checked' : '') + ' />' +
+          thumb +
+          '<div class="market-info">' +
+            '<p class="title">' + esc(e.title || 'Untitled guide') + '</p>' +
+            (e.location ? '<div class="loc">' + ICONS.pin + esc(e.location) + '</div>' : '') +
+            (e.description ? '<p class="desc">' + esc(e.description).slice(0, 160) + '</p>' : '') +
+            '<div class="market-meta">' +
+              (badge ? '<span class="trek-muted" style="font-size:12px">' + esc(badge) + '</span>' : '') +
+              (e.author ? '<span class="trek-muted" style="font-size:12px">by ' + esc(e.author) + '</span>' : '') +
+              statusBadge +
+            '</div>' +
+          '</div>' +
+          '<div class="market-actions">' +
+            '<button class="icon-btn" data-preview-key="' + esc(key) + '" type="button" title="Preview">' + ICONS.eye + '</button>' +
+            '<button class="trek-btn trek-btn--primary" data-import-key="' + esc(key) + '" type="button">' + ICONS.plus + ' ' + buttonLabel + '</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      listEl.querySelectorAll('input[data-select-key]').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          selectedKeys[cb.getAttribute('data-select-key')] = cb.checked;
+          updateBulkRow();
+        });
+      });
+      listEl.querySelectorAll('button[data-import-key]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var entry = entries.find(function (e) { return marketplaceEntryKey(e) === btn.getAttribute('data-import-key'); });
+          importOne(entry, btn);
+        });
+      });
+      listEl.querySelectorAll('button[data-preview-key]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var entry = entries.find(function (e) { return marketplaceEntryKey(e) === btn.getAttribute('data-preview-key'); });
+          openMarketplacePreviewModal(entry);
+        });
+      });
+      updateBulkRow();
+    }
+
+    function importOne(entry, btn) {
+      if (!entry || !entry.file) { trek.notify('error', 'That marketplace entry has no file to import.'); return; }
+      var wasUpdate = marketplaceEntryState(entry).needsUpdate;
+      btn.textContent = 'Importing…'; btn.disabled = true;
+      fetchAndImportGuide(entry, function (part, total) {
+        if (total > 1) btn.textContent = 'Importing… (part ' + part + ' of ' + total + ')';
+      })
+        .then(function (guideId) {
+          trek.notify('success', wasUpdate
+            ? 'Imported the updated version of "' + entry.title + '" as a new draft — your existing copy is untouched.'
+            : 'Imported "' + entry.title + '" as a draft.');
+          closeModal();
+          return loadGuides().then(function () { openGuide(guideId, 'admin-guide'); });
+        })
+        .catch(function (e2) {
+          trek.notify('error', (e2 && e2.message) || 'Could not import that guide.');
+          btn.textContent = 'Import'; btn.disabled = false;
+        });
+    }
+
+    function importSelected() {
+      var entries = allEntries.filter(function (e) { return selectedKeys[marketplaceEntryKey(e)]; });
+      if (!entries.length) return;
+      var bulkBtn = document.getElementById('marketImportSelected');
+      var statusEl = document.getElementById('marketBulkStatus');
+      bulkBtn.disabled = true;
+      var ok = 0, failed = 0;
+      entries.reduce(function (chain, entry, i) {
+        return chain.then(function () {
+          statusEl.textContent = 'Importing ' + (i + 1) + ' of ' + entries.length + ': ' + entry.title + '…';
+          return fetchAndImportGuide(entry, function (part, total) {
+            if (total > 1) statusEl.textContent = 'Importing ' + (i + 1) + ' of ' + entries.length + ': ' + entry.title + ' (part ' + part + ' of ' + total + ')…';
+          }).then(function () { ok++; }).catch(function () { failed++; });
+        });
+      }, Promise.resolve()).then(function () {
+        trek.notify('success', 'Imported ' + ok + ' guide' + (ok === 1 ? '' : 's') + (failed ? ', ' + failed + ' failed' : '') + '.');
+        closeModal();
+        return loadGuides().then(renderAdmin);
+      });
+    }
+
+    fetch(MARKETPLACE_INDEX_URL)
+      .then(function (res) {
+        if (res.status === 404) throw new Error('__EMPTY__'); // nothing published to marketplace/index.json yet
+        if (!res.ok) throw new Error("Couldn't reach the marketplace right now — try again in a moment.");
+        return res.json();
+      })
+      .then(function (rawEntries) {
+        var entries = (Array.isArray(rawEntries) ? rawEntries : []).filter(function (e, i) {
+          if (isValidMarketplaceEntry(e)) return true;
+          console.warn('Skipping malformed marketplace entry at index ' + i + ':', e);
+          return false;
+        });
+        if (!entries.length) {
+          listEl.innerHTML = '<div class="trek-muted">No guides in the marketplace yet — check back later.</div>';
+          return;
+        }
+        // Recently-added first when the entry sets addedAt (ISO date strings sort correctly as
+        // plain strings); entries without it just keep the index's own order.
+        entries.sort(function (a, b) { return String(b.addedAt || '').localeCompare(String(a.addedAt || '')); });
+        allEntries = entries;
+
+        var locations = Array.from(new Set(entries.map(function (e) { return e.location; }).filter(Boolean))).sort();
+        var filterRow = document.getElementById('marketplaceFilterRow');
+        filterRow.innerHTML =
+          '<input class="trek-input search-input" id="marketplaceSearchBox" placeholder="Search marketplace guides…" style="flex:2;margin-bottom:12px" />' +
+          (locations.length > 1
+            ? '<select class="trek-select" id="marketplaceLocationFilter" style="flex:1;margin-bottom:12px">' +
+                '<option value="">All locations</option>' +
+                locations.map(function (l) { return '<option value="' + esc(l) + '">' + esc(l) + '</option>'; }).join('') +
+              '</select>'
+            : '');
+        // Both boxes are created once here and only ever re-render #marketplaceList on input —
+        // never themselves — so typing doesn't lose focus/cursor position (same fix as the main
+        // guide list's own search).
+        document.getElementById('marketplaceSearchBox').addEventListener('input', function () {
+          marketSearch = this.value;
+          renderMarketList();
+        });
+        var locationFilter = document.getElementById('marketplaceLocationFilter');
+        if (locationFilter) locationFilter.addEventListener('change', function () {
+          marketLocation = this.value;
+          renderMarketList();
+        });
+
+        document.getElementById('marketplaceBulkRow').innerHTML =
+          '<div class="market-bulk-row">' +
+            '<label class="trek-row" style="gap:6px;align-items:center;flex:1"><input type="checkbox" id="marketSelectAll" /><span class="trek-muted" style="font-size:13px" id="marketBulkStatus">Select all</span></label>' +
+            '<button class="trek-btn trek-btn--secondary" id="marketImportSelected" type="button" disabled>Import selected (0)</button>' +
+          '</div>';
+        document.getElementById('marketSelectAll').addEventListener('change', function () {
+          var checked = this.checked;
+          visibleEntries().forEach(function (e) { selectedKeys[marketplaceEntryKey(e)] = checked; });
+          renderMarketList();
+        });
+        document.getElementById('marketImportSelected').addEventListener('click', importSelected);
+
+        renderMarketList();
+      })
+      .catch(function (e) {
+        listEl.innerHTML = e && e.message === '__EMPTY__'
+          ? '<div class="trek-muted">No guides published to the marketplace yet — check back later.</div>'
+          : '<div class="trek-muted">' + esc((e && e.message) || 'Could not load the marketplace.') + '</div>';
+      });
+  }
+
+  // A quick look at what's actually inside a marketplace guide (places, day count) before
+  // committing to import it — especially useful once there are dozens to choose from and the
+  // index's own title/description alone don't tell the whole story.
+  function openMarketplacePreviewModal(entry) {
+    if (!entry) return;
+    modalRoot.innerHTML =
+      '<div class="modal-backdrop" id="pvBackdrop"><div class="modal" style="max-width:600px">' +
+        '<h3>' + esc(entry.title || 'Preview') + '</h3>' +
+        '<div id="marketPreviewBody" class="trek-muted">Loading…</div>' +
+        '<div class="trek-row" style="margin-top:14px;justify-content:flex-end;gap:8px">' +
+          '<button class="trek-btn trek-btn--secondary" id="pvBack" type="button">Back to marketplace</button>' +
+          '<button class="trek-btn trek-btn--primary" id="pvImport" type="button">' + ICONS.plus + ' Import</button>' +
+        '</div>' +
+      '</div></div>';
+    document.getElementById('pvBackdrop').addEventListener('click', function (e) { if (e.target.id === 'pvBackdrop') closeModal(); });
+    document.getElementById('pvBack').addEventListener('click', openMarketplaceModal);
+    document.getElementById('pvImport').addEventListener('click', function () {
+      var btn = document.getElementById('pvImport');
+      btn.textContent = 'Importing…'; btn.disabled = true;
+      fetchAndImportGuide(entry, function (part, total) {
+        if (total > 1) btn.textContent = 'Importing… (part ' + part + ' of ' + total + ')';
+      }).then(function (guideId) {
+        trek.notify('success', 'Imported "' + entry.title + '" as a draft.');
+        closeModal();
+        return loadGuides().then(function () { openGuide(guideId, 'admin-guide'); });
+      }).catch(function (e2) {
+        trek.notify('error', (e2 && e2.message) || 'Could not import that guide.');
+        btn.textContent = 'Import'; btn.disabled = false;
+      });
+    });
+
+    var bodyEl = document.getElementById('marketPreviewBody');
+    fetch(MARKETPLACE_BASE + entry.file)
+      .then(function (res) {
+        if (!res.ok) throw new Error('Could not load a preview for that guide.');
+        return res.json();
+      })
+      .then(function (payload) {
+        var blocks = Array.isArray(payload.blocks) ? payload.blocks : [];
+        var places = blocks.filter(function (b) { return b.type === 'place' || b.type === 'activity'; });
+        var dayCount = blocks.filter(function (b) { return b.type === 'day'; }).length;
+        bodyEl.className = '';
+        bodyEl.innerHTML =
+          (payload.guide.location ? '<div class="loc">' + ICONS.pin + esc(payload.guide.location) + '</div>' : '') +
+          (payload.guide.description ? '<p style="margin:8px 0">' + esc(payload.guide.description).slice(0, 400) + '</p>' : '') +
+          '<p class="trek-muted" style="font-size:12px;margin:8px 0">' +
+            places.length + (places.length === 1 ? ' place' : ' places') +
+            (dayCount ? ' · ' + dayCount + (dayCount === 1 ? ' day' : ' days') : '') +
+          '</p>' +
+          '<div style="max-height:280px;overflow:auto">' +
+            places.slice(0, 40).map(function (p) {
+              var d = p.data || {};
+              return '<div style="padding:6px 0;border-bottom:1px solid var(--border-faint)">' +
+                '<strong>' + esc(d.name || 'Untitled') + '</strong> ' + categoryChipHtml(d.category) +
+                (d.address ? '<div class="trek-muted" style="font-size:12px">' + esc(d.address) + '</div>' : '') +
+              '</div>';
+            }).join('') +
+            (places.length > 40 ? '<div class="trek-muted" style="font-size:12px;padding-top:6px">+ ' + (places.length - 40) + ' more</div>' : '') +
+          '</div>';
+      })
+      .catch(function (e) {
+        bodyEl.innerHTML = '<div class="trek-muted">' + esc(e.message || 'Could not load a preview.') + '</div>';
+      });
+  }
+
+  function slugify(s) {
+    return (String(s || 'guide').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)) || 'guide';
+  }
+
+  // The author's own workflow for populating the marketplace: build a guide normally in TREK,
+  // then export it here — strips out everything meaningless outside this one instance (id,
+  // status, featured, timestamps), leaving exactly the shape /guide/import-marketplace expects.
+  //
+  // No actual file download, on purpose — a plugin iframe is sandboxed with only
+  // "allow-scripts allow-forms" (confirmed directly: a real sandbox="allow-scripts allow-forms"
+  // iframe silently swallows a blob/<a download> click with no event and no error at all, since
+  // triggering a download needs the allow-downloads sandbox token, which is the host's call, not
+  // something a plugin can request). Shown as selectable text instead — click a box to select
+  // all of it, copy, paste into a file yourself. Clunkier than a real download, but it actually
+  // works, on every host, rather than silently doing nothing on this one.
+  // A much smaller re-encode of an already-compressed photo, specifically for the marketplace
+  // index — that file is meant to be one light fetch covering the whole list (20-50+ guides),
+  // so it needs a true thumbnail, not the guide's full ~60KB cover photo repeated in every entry.
+  function recompressDataUriToThumbnail(dataUri, maxDim, quality) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        var w = Math.max(1, Math.round(img.width * scale));
+        var h = Math.max(1, Math.round(img.height * scale));
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        var c2d = canvas.getContext('2d');
+        c2d.fillStyle = '#fff'; c2d.fillRect(0, 0, w, h);
+        c2d.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = dataUri;
+    });
+  }
+
+  function openExportModal(id) {
+    api('/guide?id=' + id).then(function (d) {
+      var thumbPromise = d.guide.coverPhoto ? recompressDataUriToThumbnail(d.guide.coverPhoto, 100, 0.5) : Promise.resolve(null);
+      return thumbPromise.then(function (thumb) { return { d: d, thumb: thumb }; });
+    }).then(function (r) {
+      var d = r.d;
+      var payload = {
+        guide: { title: d.guide.title, location: d.guide.location, description: d.guide.description, template: d.guide.template },
+        blocks: d.blocks.map(function (b) { return { type: b.type, data: b.data }; }),
+      };
+      var slug = slugify(d.guide.title);
+      var today = new Date().toISOString().slice(0, 10);
+      var entry = {
+        id: slug,
+        title: d.guide.title,
+        location: d.guide.location || null,
+        description: d.guide.description || null,
+        author: '',
+        coverPhoto: r.thumb || null,
+        placeCount: d.guide.placeCount || 0,
+        days: d.guide.days || null,
+        addedAt: today,
+        updatedAt: today,
+        file: 'guides/' + slug + '.json',
+      };
+      modalRoot.innerHTML =
+        '<div class="modal-backdrop" id="backdrop"><div class="modal" style="max-width:640px">' +
+          '<h3>Export "' + esc(d.guide.title) + '"</h3>' +
+          '<p class="trek-muted" style="margin:0 0 12px">' +
+            "Plugins can't trigger a file download directly — click a box below to select all of " +
+            'it, copy, and save it yourself.' +
+          '</p>' +
+          '<span class="field-label">Save as <code>marketplace/guides/' + esc(slug) + '.json</code></span>' +
+          '<textarea class="trek-textarea" readonly style="min-height:160px;font-family:monospace;font-size:12px" id="guideJsonBox">' + esc(JSON.stringify(payload, null, 2)) + '</textarea>' +
+          '<span class="field-label" style="margin-top:10px;display:block">Then add this entry to <code>marketplace/index.json</code> — fill in <code>author</code> yourself first</span>' +
+          '<textarea class="trek-textarea" readonly style="min-height:120px;font-family:monospace;font-size:12px" id="entrySnippet">' + esc(JSON.stringify(entry, null, 2)) + '</textarea>' +
+          '<div class="trek-row" style="margin-top:14px;justify-content:flex-end">' +
+            '<button class="trek-btn trek-btn--primary" id="bfCancel" type="button">Done</button>' +
+          '</div>' +
+        '</div></div>';
+      document.getElementById('backdrop').addEventListener('click', function (e) { if (e.target.id === 'backdrop') closeModal(); });
+      document.getElementById('bfCancel').addEventListener('click', closeModal);
+      ['guideJsonBox', 'entrySnippet'].forEach(function (elId) {
+        var ta = document.getElementById(elId);
+        ta.addEventListener('click', function () { ta.select(); });
+      });
+    }).catch(function () { trek.notify('error', 'Could not export that guide.'); });
+  }
+
   function openImportPdfModal() {
     modalRoot.innerHTML =
       '<div class="modal-backdrop" id="backdrop"><div class="modal">' +
@@ -1619,6 +2158,104 @@ body.trek-ui {
     });
   }
 
+  // ---------------- Save to Collection ----------------
+  // Generic collection-picker modal — shared by the whole-guide export (below) and the
+  // single-place "Save" action next to "Add to trip" on each place/activity card. `opts.title`
+  // is pre-escaped HTML (the caller builds it), everything else is plain text.
+  function openSaveToCollectionModal(opts) {
+    modalRoot.innerHTML =
+      '<div class="modal-backdrop" id="backdrop"><div class="modal">' +
+        '<h3>' + opts.title + '</h3>' +
+        '<p class="trek-muted" style="margin:0 0 14px">' + opts.description + '</p>' +
+        '<div id="collectionChoiceBody" class="trek-muted">Loading your collections…</div>' +
+        '<div class="btn-row" style="margin-top:16px;justify-content:flex-end;gap:8px">' +
+          '<button class="trek-btn trek-btn--secondary" id="scCancel" type="button">Cancel</button>' +
+          '<button class="trek-btn trek-btn--primary" id="scSubmit" type="button">' + ICONS.bookmark + ' Save</button>' +
+        '</div>' +
+      '</div></div>';
+    document.getElementById('backdrop').addEventListener('click', function (e) { if (e.target.id === 'backdrop') closeModal(); });
+    document.getElementById('scCancel').addEventListener('click', closeModal);
+
+    var bodyEl = document.getElementById('collectionChoiceBody');
+    api('/collections').then(function (d) {
+      var collections = d.collections || [];
+      bodyEl.innerHTML =
+        (collections.length
+          ? '<span class="field-label">Choose a collection</span>' +
+            '<select class="trek-select" id="scExisting">' +
+              '<option value="">— New collection —</option>' +
+              collections.map(function (c) { return '<option value="' + c.id + '">' + esc(c.name) + '</option>'; }).join('') +
+            '</select>'
+          : '<span class="trek-muted">You don\'t have any collections yet — this will create your first one.</span>') +
+        '<div id="scNewNameRow" style="margin-top:10px' + (collections.length ? '' : ';display:none') + '">' +
+          '<span class="field-label">New collection name</span>' +
+          '<input class="trek-input" id="scNewName" placeholder="' + esc(opts.defaultName) + '" />' +
+        '</div>';
+      var existingSelect = document.getElementById('scExisting');
+      var newNameRow = document.getElementById('scNewNameRow');
+      if (existingSelect) existingSelect.addEventListener('change', function () {
+        newNameRow.style.display = this.value ? 'none' : '';
+      });
+    }).catch(function () {
+      bodyEl.innerHTML = '<span class="trek-muted">Could not load your collections — you can still save into a new one.</span>' +
+        '<div id="scNewNameRow" style="margin-top:10px">' +
+          '<span class="field-label">New collection name</span>' +
+          '<input class="trek-input" id="scNewName" placeholder="' + esc(opts.defaultName) + '" />' +
+        '</div>';
+    });
+
+    document.getElementById('scSubmit').addEventListener('click', function () {
+      var existingSelect = document.getElementById('scExisting');
+      var collectionId = existingSelect && existingSelect.value ? Number(existingSelect.value) : null;
+      var newNameInput = document.getElementById('scNewName');
+      var newCollectionName = (!collectionId && newNameInput) ? newNameInput.value.trim() || opts.defaultName : null;
+      if (!collectionId && !newCollectionName) { trek.notify('warning', 'Pick a collection or name a new one'); return; }
+      var btn = document.getElementById('scSubmit');
+      btn.textContent = 'Saving…'; btn.disabled = true;
+      opts.onSubmit(collectionId, collectionId ? null : newCollectionName).catch(function () {
+        btn.textContent = 'Save'; btn.disabled = false;
+      });
+    });
+  }
+
+  function openSaveGuideToCollectionModal(guide, placeCount) {
+    openSaveToCollectionModal({
+      title: 'Save "' + esc(guide.title) + '" to a Collection',
+      description: 'Saves all ' + placeCount + (placeCount === 1 ? ' place' : ' places') + ' in this guide into one of your own Collections, ' +
+        'ready to browse later — separate from adding places into a trip.',
+      defaultName: guide.title,
+      onSubmit: function (collectionId, newCollectionName) {
+        return api('/guide/export-to-collection', {
+          method: 'POST',
+          body: { guideId: guide.id, collectionId: collectionId, newCollectionName: newCollectionName },
+        }).then(function (d) {
+          var parts = [d.saved + ' of ' + d.total + ' place' + (d.total === 1 ? '' : 's') + ' saved'];
+          if (d.failed) parts.push(d.failed + ' failed');
+          trek.notify('success', parts.join(', ') + '. Find it in your Collections.');
+          closeModal();
+        });
+      },
+    });
+  }
+
+  function openSavePlaceToCollectionModal(block) {
+    var name = block.data.name;
+    openSaveToCollectionModal({
+      title: 'Save "' + esc(name) + '" to a Collection',
+      description: 'Saves this place into one of your own Collections, ready to browse later — separate from adding it into a trip.',
+      defaultName: name,
+      onSubmit: function (collectionId, newCollectionName) {
+        return api('/guide/blocks/save-to-collection', {
+          method: 'POST',
+          body: { blockId: block.id, collectionId: collectionId, newCollectionName: newCollectionName },
+        }).then(function () {
+          trek.notify('success', 'Saved to your Collection');
+          closeModal();
+        });
+      },
+    });
+  }
+
   // ---------------- Block renderers (public) ----------------
   function placeLikeCardHtml(block, opts) {
     var p = block.data;
@@ -1634,7 +2271,10 @@ body.trek-ui {
         (p.description ? '<p class="desc">' + esc(p.description).slice(0, 400) + '</p>' : '') +
         tips +
       '</div>' +
-      '<div class="place-actions"><button class="trek-btn trek-btn--primary" data-add-block="' + block.id + '" type="button">' + ICONS.plus + ' Add to trip</button></div>' +
+      '<div class="place-actions">' +
+        '<button class="trek-btn trek-btn--secondary" data-save-block="' + block.id + '" type="button">' + ICONS.bookmark + ' Save</button>' +
+        '<button class="trek-btn trek-btn--primary" data-add-block="' + block.id + '" type="button">' + ICONS.plus + ' Add to trip</button>' +
+      '</div>' +
     '</div>';
   }
 
@@ -1719,6 +2359,7 @@ body.trek-ui {
           '<div class="guide-cover" style="' + (g.coverPhoto ? '' : 'background:' + gradientFor(g.title)) + '">' +
             '<span class="cover-badge">' + esc(badge) + '</span>' +
             (state.isAdmin && g.status === 'draft' ? '<span class="draft-badge">Draft</span>' : '') +
+            (g.featured ? '<span class="featured-badge">' + ICONS.star + ' Featured</span>' : '') +
             cover +
           '</div>' +
           '<div class="guide-meta">' +
@@ -1739,7 +2380,8 @@ body.trek-ui {
     var g = state.guide;
     pageTitle.textContent = '';
     searchRowEl.innerHTML = '';
-    adminToggleEl.innerHTML = state.isAdmin
+    var isPreview = !!state.previewingFromEditor;
+    adminToggleEl.innerHTML = state.isAdmin && !isPreview
       ? '<button class="trek-btn trek-btn--secondary" id="toAdminGuide" type="button">Edit this guide</button>' : '';
 
     var dayBlocks = state.blocks.filter(function (b) { return b.type === 'day'; });
@@ -1749,18 +2391,42 @@ body.trek-ui {
         }).join('') + '</div>'
       : '';
 
-    var bodyHtml = state.blocks.length
-      ? '<div class="timeline">' + state.blocks.map(function (b) { return publicBlockHtml(b, b.id); }).join('') + '</div>'
+    // The hero banner's photo is the first block with one (place.photoDataUri or image.dataUri —
+    // see server-side blockPhoto()), not a separate asset — so that same block would otherwise
+    // also render again in the normal content flow right below the hero. For a Place that's a
+    // minor overlap (a small thumbnail alongside real info still worth showing), but a plain
+    // Image block has no other content beyond that photo, so showing it a second time, full-size,
+    // directly under an already-identical-looking hero reads as a mistake. Skip only that case.
+    var heroBlockId = null;
+    if (g.coverPhoto) {
+      for (var hi = 0; hi < state.blocks.length; hi++) {
+        var hb = state.blocks[hi];
+        if ((hb.type === 'place' && hb.data.photoDataUri) || (hb.type === 'image' && hb.data.dataUri)) { heroBlockId = hb.id; break; }
+      }
+    }
+    var heroBlock = heroBlockId != null ? state.blocks.find(function (b) { return b.id === heroBlockId; }) : null;
+    var skipHeroImageBlock = !!(heroBlock && heroBlock.type === 'image');
+    var bodyBlocks = skipHeroImageBlock ? state.blocks.filter(function (b) { return b.id !== heroBlockId; }) : state.blocks;
+    var bodyHtml = bodyBlocks.length
+      ? '<div class="timeline">' + bodyBlocks.map(function (b) { return publicBlockHtml(b, b.id); }).join('') + '</div>'
       : '<div class="empty">' + ICONS.pin + '<div>No content in this guide yet.</div></div>';
 
     var heroStyle = g.coverPhoto
       ? 'background-image:url(' + esc(g.coverPhoto) + ')'
       : 'background:' + gradientFor(g.title);
 
+    var placeBlockCount = state.blocks.filter(function (b) { return b.type === 'place'; }).length;
+
     contentEl.innerHTML =
       '<div class="back-row">' +
-        '<button class="trek-btn trek-btn--secondary" id="backBtn" type="button">' + ICONS.back + ' Back</button>' +
-        '<button class="trek-btn trek-btn--primary" id="planTripBtn" type="button">' + ICONS.compass + ' Plan a trip</button>' +
+        '<button class="trek-btn trek-btn--secondary" id="backBtn" type="button">' + ICONS.back + ' ' + (isPreview ? 'Back to editor' : 'Back') + '</button>' +
+        (isPreview ? '<span class="preview-banner">' + ICONS.eye + ' Previewing as a traveler' + (g.status !== 'published' ? ' — still a Draft' : '') + '</span>' : '') +
+        '<div class="back-row-actions">' +
+          (placeBlockCount
+            ? '<button class="trek-btn trek-btn--secondary" id="saveToCollectionBtn" type="button">' + ICONS.bookmark + ' Save to Collection</button>'
+            : '') +
+          '<button class="trek-btn trek-btn--primary" id="planTripBtn" type="button">' + ICONS.compass + ' Plan a trip</button>' +
+        '</div>' +
       '</div>' +
       '<div class="hero" style="' + heroStyle + '">' +
         (g.coverPhoto ? '<div class="hero-shade"></div>' : '') +
@@ -1772,8 +2438,13 @@ body.trek-ui {
       '</div>' +
       timelineNav + bodyHtml;
 
-    document.getElementById('backBtn').addEventListener('click', function () { state.view = 'list'; render(); });
+    document.getElementById('backBtn').addEventListener('click', function () {
+      if (isPreview) { state.previewingFromEditor = false; state.view = 'admin-guide'; render(); }
+      else { state.view = 'list'; render(); }
+    });
     document.getElementById('planTripBtn').addEventListener('click', function () { openPlanTripModal(g); });
+    var saveToCollectionBtn = document.getElementById('saveToCollectionBtn');
+    if (saveToCollectionBtn) saveToCollectionBtn.addEventListener('click', function () { openSaveGuideToCollectionModal(g, placeBlockCount); });
     var toAdminGuide = document.getElementById('toAdminGuide');
     if (toAdminGuide) toAdminGuide.addEventListener('click', function () { state.view = 'admin-guide'; render(); });
 
@@ -1781,6 +2452,12 @@ body.trek-ui {
       btn.addEventListener('click', function () {
         var block = state.blocks.find(function (b) { return b.id === Number(btn.getAttribute('data-add-block')); });
         if (block) openAddToTripModal(block);
+      });
+    });
+    contentEl.querySelectorAll('button[data-save-block]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var block = state.blocks.find(function (b) { return b.id === Number(btn.getAttribute('data-save-block')); });
+        if (block) openSavePlaceToCollectionModal(block);
       });
     });
     contentEl.querySelectorAll('[data-open-link]').forEach(function (el) {
@@ -1826,40 +2503,104 @@ body.trek-ui {
     pageTitle.textContent = 'Manage guides';
     searchRowEl.innerHTML = '';
     adminToggleEl.innerHTML =
+      '<button class="trek-btn trek-btn--secondary" id="marketplaceBtn" type="button">' + ICONS.store + ' Marketplace</button>' +
       '<button class="trek-btn trek-btn--secondary" id="importPdfBtn" type="button">' + ICONS.upload + ' Import from PDF</button>' +
       '<button class="trek-btn trek-btn--secondary" id="backToList" type="button">' + ICONS.back + ' Back to guides</button>';
 
+    var showCreateForm = adminCreateFormOpen || !state.guides.length;
     contentEl.innerHTML =
-      '<div class="trek-glass" style="padding:16px;margin-bottom:20px">' +
-        '<div class="trek-title">Configure your guide</div>' +
-        '<p class="trek-muted" style="margin:2px 0 14px">Choose a title, location and template for your guide.</p>' +
-        '<div class="form-grid">' +
-          '<div class="full"><span class="field-label">Title</span><input class="trek-input" id="newTitle" placeholder="Choose your title" /></div>' +
-          '<div class="full"><span class="field-label">Location</span><input class="trek-input" id="newLocation" placeholder="Choose your location" />' +
-            '<div id="newLocationCheck" class="trek-muted" style="margin-top:4px;font-size:12px"></div></div>' +
-          templatePickerHtml('new', 'blank', null) +
-          '<div class="full"><span class="field-label">Description</span><textarea class="trek-textarea" id="newDescription" placeholder="A short overview travellers will see first"></textarea></div>' +
-        '</div>' +
-        '<button class="trek-btn trek-btn--primary" id="createGuide" type="button" style="margin-top:10px">' + ICONS.plus + ' Create guide</button>' +
-      '</div>' +
+      (showCreateForm
+        ? '<div class="trek-glass" style="padding:16px;margin-bottom:20px">' +
+            '<div class="trek-row" style="justify-content:space-between;align-items:flex-start">' +
+              '<div><div class="trek-title">Configure your guide</div>' +
+              '<p class="trek-muted" style="margin:2px 0 14px">Choose a title, location and template for your guide.</p></div>' +
+              (state.guides.length ? '<button class="trek-btn trek-btn--secondary" id="cancelCreate" type="button">Cancel</button>' : '') +
+            '</div>' +
+            '<div class="form-grid">' +
+              '<div class="full"><span class="field-label">Title</span><input class="trek-input" id="newTitle" placeholder="Choose your title" /></div>' +
+              '<div class="full"><span class="field-label">Location</span><input class="trek-input" id="newLocation" placeholder="Choose your location" />' +
+                '<div id="newLocationCheck" class="trek-muted" style="margin-top:4px;font-size:12px"></div></div>' +
+              templatePickerHtml('new', 'blank', null) +
+              '<div class="full"><span class="field-label">Description</span><textarea class="trek-textarea" id="newDescription" placeholder="A short overview travellers will see first"></textarea></div>' +
+            '</div>' +
+            '<button class="trek-btn trek-btn--primary" id="createGuide" type="button" style="margin-top:10px">' + ICONS.plus + ' Create guide</button>' +
+          '</div>'
+        : '<button class="trek-btn trek-btn--primary" id="showCreateForm" type="button" style="margin-bottom:20px">' + ICONS.plus + ' New guide</button>'
+      ) +
+      (state.guides.length
+        ? '<input class="trek-input search-input" id="adminSearchBox" placeholder="Search your guides by title or location…" value="' + esc(state.adminSearch) + '" style="margin-bottom:12px" />'
+        : '') +
       '<div id="guideList"></div>';
-    bindTemplatePicker('new');
-    var getNewLocationWarning = wireLocationCheck('newLocation', 'newLocationCheck');
+
+    // Created once, like the public list's own search box (see renderList) — re-filtering on
+    // every keystroke must only touch #guideList, never rebuild this input itself, or it loses
+    // focus/cursor position after every character typed.
+    var adminSearchBox = document.getElementById('adminSearchBox');
+    if (adminSearchBox) adminSearchBox.addEventListener('input', function () {
+      state.adminSearch = this.value;
+      renderGuideRows();
+    });
+
+    if (showCreateForm) {
+      bindTemplatePicker('new');
+      var getNewLocationWarning = wireLocationCheck('newLocation', 'newLocationCheck');
+      var cancelCreate = document.getElementById('cancelCreate');
+      if (cancelCreate) cancelCreate.addEventListener('click', function () { adminCreateFormOpen = false; renderAdmin(); });
+    } else {
+      document.getElementById('showCreateForm').addEventListener('click', function () { adminCreateFormOpen = true; renderAdmin(); });
+    }
 
     function renderGuideRows() {
       var box = document.getElementById('guideList');
       if (!state.guides.length) { box.innerHTML = '<div class="empty">No guides yet — create one above.</div>'; return; }
-      box.innerHTML = state.guides.map(function (g) {
+      var q = (state.adminSearch || '').trim().toLowerCase();
+      var visibleGuides = q
+        ? state.guides.filter(function (g) { return (g.title + ' ' + (g.location || '')).toLowerCase().indexOf(q) !== -1; })
+        : state.guides;
+      if (!visibleGuides.length) { box.innerHTML = '<div class="empty">No guides match your search.</div>'; return; }
+      box.innerHTML = visibleGuides.map(function (g) {
         return '<div class="admin-guide-row">' +
+          '<button class="icon-btn' + (g.featured ? ' icon-btn--featured' : '') + '" data-feature="' + g.id + '" type="button" title="' + (g.featured ? 'Unfeature' : 'Feature — pin to the top of the list') + '">' + ICONS.star + '</button>' +
           '<span class="title">' + esc(g.title) + (g.location ? ' — ' + esc(g.location) : '') + '</span>' +
           '<span class="status-chip status-chip--' + g.status + '">' + g.status + '</span>' +
           '<span class="trek-muted">' + g.placeCount + ' places</span>' +
-          '<button class="trek-btn trek-btn--secondary" data-open="' + g.id + '" type="button">' + ICONS.edit + '</button>' +
-          '<button class="trek-btn trek-btn--danger" data-del="' + g.id + '" type="button">' + ICONS.trash + '</button>' +
+          '<button class="icon-btn" data-open="' + g.id + '" type="button" title="Edit guide">' + ICONS.edit + '</button>' +
+          '<button class="icon-btn" data-dup="' + g.id + '" type="button" title="Duplicate guide">' + ICONS.copy + '</button>' +
+          '<button class="icon-btn" data-export="' + g.id + '" type="button" title="Export as JSON (for the marketplace)">' + ICONS.download + '</button>' +
+          '<button class="icon-btn icon-btn--danger" data-del="' + g.id + '" type="button" title="Delete guide">' + ICONS.trash + '</button>' +
         '</div>';
       }).join('');
       box.querySelectorAll('button[data-open]').forEach(function (b) {
         b.addEventListener('click', function () { openGuide(Number(b.getAttribute('data-open')), 'admin-guide'); });
+      });
+      box.querySelectorAll('button[data-feature]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var id = Number(b.getAttribute('data-feature'));
+          var g = state.guides.find(function (x) { return x.id === id; });
+          if (!g) return;
+          var nextFeatured = !g.featured;
+          api('/guide/feature', { method: 'POST', body: { id: id, featured: nextFeatured } }).then(function (d) {
+            Object.assign(g, { featured: d.guide.featured });
+            // Featuring re-sorts the list (featured-first) — a full reload keeps that order
+            // correct instead of just flipping the star in place on a row that's now misplaced.
+            return loadGuides();
+          }).then(renderGuideRows);
+        });
+      });
+      box.querySelectorAll('button[data-dup]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var id = Number(b.getAttribute('data-dup'));
+          b.disabled = true;
+          api('/guide/duplicate', { method: 'POST', body: { id: id } })
+            .then(function (d) {
+              trek.notify('success', 'Duplicated as "' + d.guide.title + '" — a new draft.');
+              return loadGuides();
+            }).then(renderGuideRows)
+            .catch(function () { b.disabled = false; });
+        });
+      });
+      box.querySelectorAll('button[data-export]').forEach(function (b) {
+        b.addEventListener('click', function () { openExportModal(Number(b.getAttribute('data-export'))); });
       });
       box.querySelectorAll('button[data-del]').forEach(function (b) {
         b.addEventListener('click', function () {
@@ -1876,7 +2617,9 @@ body.trek-ui {
 
     document.getElementById('backToList').addEventListener('click', function () { state.view = 'list'; render(); });
     document.getElementById('importPdfBtn').addEventListener('click', openImportPdfModal);
-    document.getElementById('createGuide').addEventListener('click', function () {
+    document.getElementById('marketplaceBtn').addEventListener('click', openMarketplaceModal);
+    var createGuideBtn = document.getElementById('createGuide');
+    if (createGuideBtn) createGuideBtn.addEventListener('click', function () {
       var title = document.getElementById('newTitle').value.trim();
       if (!title) { trek.notify('warning', 'Title is required'); return; }
       var template = getSelectedTemplate('new');
@@ -1892,12 +2635,12 @@ body.trek-ui {
         if (!ok) return;
         return api('/guide', { method: 'POST', body: { title: title, location: location, description: description, template: template, dayCount: dayCount } })
           .then(function () {
-            document.getElementById('newTitle').value = '';
-            document.getElementById('newLocation').value = '';
-            document.getElementById('newLocationCheck').textContent = '';
-            document.getElementById('newDescription').value = '';
+            // Collapse back to the compact "+ New guide" button and refresh the whole dashboard —
+            // simpler than patching form-reset + guide-list state separately, and the new guide's
+            // row appearing is the confirmation that it worked.
+            adminCreateFormOpen = false;
             return loadGuides();
-          }).then(renderGuideRows);
+          }).then(renderAdmin);
       });
     });
   }
@@ -1924,7 +2667,13 @@ body.trek-ui {
     var g = state.guide;
     pageTitle.textContent = 'Edit guide';
     searchRowEl.innerHTML = '';
-    adminToggleEl.innerHTML = '<button class="trek-btn trek-btn--secondary" id="backToAdmin" type="button">' + ICONS.back + ' Back</button>';
+    adminToggleEl.innerHTML =
+      '<button class="trek-btn trek-btn--secondary" id="previewGuideBtn" type="button">' + ICONS.eye + ' Preview</button>' +
+      '<button class="trek-btn trek-btn--secondary" id="backToAdmin" type="button">' + ICONS.back + ' Back</button>';
+    document.getElementById('previewGuideBtn').addEventListener('click', function () {
+      state.previewingFromEditor = true;
+      openGuide(g.id, 'detail');
+    });
 
     var missingCoordsCount = state.blocks.filter(function (b) {
       return b.type === 'place' && !(typeof b.data.lat === 'number' && typeof b.data.lon === 'number');
@@ -1952,11 +2701,11 @@ body.trek-ui {
       '<div class="trek-glass" style="padding:16px;margin-bottom:20px">' +
         '<div class="trek-title" style="margin-bottom:10px">Content</div>' +
         '<div id="blockList"></div>' +
-        '<div class="add-item-row">' +
-          '<select class="trek-select" id="blockTypePicker">' +
-            BLOCK_MENU.map(function (m, i) { return '<option value="' + i + '">' + m.label + '</option>'; }).join('') +
-          '</select>' +
-          '<button class="trek-btn trek-btn--primary" id="addItemBtn" type="button">' + ICONS.plus + ' Add item</button>' +
+        '<span class="field-label">Add item</span>' +
+        '<div class="add-item-grid">' +
+          BLOCK_MENU.map(function (m, i) {
+            return '<button class="add-item-btn" data-menu-index="' + i + '" type="button">' + ICONS[m.icon] + '<span>' + m.label + '</span></button>';
+          }).join('') +
         '</div>' +
       '</div>';
 
@@ -2079,13 +2828,17 @@ body.trek-ui {
     function renderBlockList() {
       var box = document.getElementById('blockList');
       if (!state.blocks.length) { box.innerHTML = '<div class="empty">No content yet — add your first item below.</div>'; return; }
+      var seenDay = false;
       box.innerHTML = state.blocks.map(function (b) {
-        return '<div class="block-row" draggable="true" data-block-id="' + b.id + '">' +
+        var isDay = b.type === 'day';
+        if (isDay) seenDay = true;
+        var rowClass = 'block-row' + (isDay ? ' block-row--day' : (seenDay ? ' block-row--indented' : ''));
+        return '<div class="' + rowClass + '" draggable="true" data-block-id="' + b.id + '">' +
           '<span class="drag-handle">' + ICONS.grip + '</span>' +
           '<div class="block-preview"><div class="block-type-label">' + b.type + '</div>' + adminBlockPreviewHtml(b) + '</div>' +
           '<div class="block-actions">' +
-            '<button class="trek-btn trek-btn--secondary" data-edit-block="' + b.id + '" type="button">' + ICONS.edit + '</button>' +
-            '<button class="trek-btn trek-btn--danger" data-del-block="' + b.id + '" type="button">' + ICONS.trash + '</button>' +
+            '<button class="icon-btn" data-edit-block="' + b.id + '" type="button" title="Edit">' + ICONS.edit + '</button>' +
+            '<button class="icon-btn icon-btn--danger" data-del-block="' + b.id + '" type="button" title="Delete">' + ICONS.trash + '</button>' +
           '</div>' +
         '</div>';
       }).join('');
@@ -2107,7 +2860,19 @@ body.trek-ui {
       });
       box.querySelectorAll('button[data-del-block]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          api('/guide/blocks?id=' + btn.getAttribute('data-del-block'), { method: 'DELETE' }).then(refreshBlocks);
+          var id = btn.getAttribute('data-del-block');
+          var block = state.blocks.find(function (b) { return b.id === Number(id); });
+          var isDay = block && block.type === 'day';
+          trek.confirm({
+            title: 'Delete this item',
+            message: isDay
+              ? 'This removes the day header — the places under it stay, just no longer grouped under a day.'
+              : 'This removes it from the guide. This cannot be undone.',
+            danger: true,
+          }).then(function (ok) {
+            if (!ok) return;
+            api('/guide/blocks?id=' + id, { method: 'DELETE' }).then(refreshBlocks);
+          });
         });
       });
       box.querySelectorAll('button[data-edit-block]').forEach(function (btn) {
@@ -2119,9 +2884,11 @@ body.trek-ui {
     }
     renderBlockList();
 
-    document.getElementById('addItemBtn').addEventListener('click', function () {
-      var entry = BLOCK_MENU[Number(document.getElementById('blockTypePicker').value)];
-      openAddBlockModal(entry, g, refreshBlocks);
+    document.querySelectorAll('.add-item-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var entry = BLOCK_MENU[Number(btn.getAttribute('data-menu-index'))];
+        openAddBlockModal(entry, g, refreshBlocks);
+      });
     });
   }
 
@@ -2341,6 +3108,37 @@ body.trek-ui {
     document.getElementById('backdrop').addEventListener('click', function (e) { if (e.target.id === 'backdrop') closeModal(); });
     document.getElementById('bfCancel').addEventListener('click', closeModal);
 
+    function placePhotoPreviewHtml(dataUri) {
+      if (!dataUri) return '';
+      return '<img src="' + esc(dataUri) + '" style="max-height:100px;border-radius:8px;vertical-align:middle" alt="" />' +
+        '<button class="trek-btn trek-btn--secondary" id="pPhotoRemove" type="button" style="margin-left:8px">Remove</button>';
+    }
+
+    function wirePlacePhotoRemove() {
+      var removeBtn = document.getElementById('pPhotoRemove');
+      if (removeBtn) removeBtn.addEventListener('click', function () { document.getElementById('pPhotoPreview').innerHTML = ''; });
+    }
+
+    // Same compress-then-preview flow as the standalone Image block's own upload (see
+    // handleImageFile) — OpenTripMap/Collection/PDF imports already bring a photo along
+    // automatically; typing a place in by hand had no way to attach one at all.
+    function handlePlacePhotoFile(file) {
+      if (!file) return;
+      var box = document.getElementById('pPhotoPreview');
+      if (box) box.innerHTML = '<span class="trek-muted">Compressing…</span>';
+      compressImageFile(file).then(function (dataUri) {
+        if (!box) return;
+        if (dataUriByteSize(dataUri) > MAX_UPLOAD_DATA_URI_BYTES) {
+          box.innerHTML = '<span class="trek-muted">That image is still too large even compressed — try a smaller photo.</span>';
+          return;
+        }
+        box.innerHTML = placePhotoPreviewHtml(dataUri);
+        wirePlacePhotoRemove();
+      }).catch(function (e) {
+        if (box) box.innerHTML = '<span class="trek-muted">' + esc(e.message || 'Could not process that image.') + '</span>';
+      });
+    }
+
     function renderManualPane() {
       var d = (editingBlock && editingBlock.data) || {};
       document.getElementById('placePane').innerHTML =
@@ -2351,22 +3149,29 @@ body.trek-ui {
             CATEGORIES.map(function (c) { return '<option value="' + esc(c) + '"' + (d.category === c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') +
           '</select></div>' +
           '<div><span class="field-label">Rating (1-7)</span><input class="trek-input" id="pRating" type="number" min="1" max="7" value="' + (d.rating != null ? d.rating : '') + '" /></div>' +
+          '<div class="full"><span class="field-label">Photo (optional)</span><input class="trek-input" id="pPhotoFile" type="file" accept="image/*" />' +
+            '<div id="pPhotoPreview" style="margin-top:8px">' + placePhotoPreviewHtml(d.photoDataUri) + '</div></div>' +
           '<div class="full"><span class="field-label">Description</span><textarea class="trek-textarea" id="pDescription">' + esc(d.description || '') + '</textarea></div>' +
           '<div class="full"><span class="field-label">Tips (one per line)</span><textarea class="trek-textarea" id="pTips">' + esc((d.tips || []).join('\n')) + '</textarea></div>' +
         '</div>' +
         '<button class="trek-btn trek-btn--primary" id="addManual" type="button" style="margin-top:10px">' + ICONS.plus + ' ' + (editingBlock ? 'Save' : 'Add place') + '</button>';
+
+      wirePlacePhotoRemove();
+      document.getElementById('pPhotoFile').addEventListener('change', function () { handlePlacePhotoFile(this.files[0]); });
 
       document.getElementById('addManual').addEventListener('click', function () {
         var name = document.getElementById('pName').value.trim();
         if (!name) { trek.notify('warning', 'Name is required'); return; }
         var rating = Number(document.getElementById('pRating').value);
         var tips = document.getElementById('pTips').value.split('\n').map(function (t) { return t.trim(); }).filter(Boolean);
+        var photoImg = document.querySelector('#pPhotoPreview img');
         var data = {
           name: name,
           category: document.getElementById('pCategory').value.trim() || null,
           description: document.getElementById('pDescription').value.trim() || null,
           rating: Number.isInteger(rating) ? rating : null,
           tips: tips,
+          photoDataUri: photoImg ? photoImg.getAttribute('src') : null,
         };
         var req = editingBlock
           ? api('/guide/blocks', { method: 'PUT', body: { id: editingBlock.id, data: Object.assign({}, editingBlock.data, data) } })
