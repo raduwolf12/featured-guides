@@ -530,6 +530,13 @@
         "source": "pdf-import",
         "xid": null
       }
+    },
+    {
+      "type": "link",
+      "data": {
+        "url": "https://mindtrip.ai/inspiration/seoul-busan-10-days/in-adJJvTg1",
+        "label": "origin"
+      }
     }
   ]
 }
