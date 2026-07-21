@@ -18,15 +18,6 @@
     "file": "guides/seoul-busan-in-10-days.json"
   },
   {
-  "id": "short-upper-mustang-trek-explore",
-  "title": "Short Upper Mustang Trek | Explore",
-  "location": "Mustang",
-  "description": "Short Upper Mustang Trek Explore Mustang in 7-10 Days\nEmbark on an unforgettable journey through the mystical landscapes of Upper\nMustang with our Short Upper Mustang Trek. Designed for adventure seekers with\nlimited time, this 7-10 day trek o ff ers a perfect blend of Nepal’s cultural heritage,\nancient Tibetan villages, and stunning desert-like scenery. Explore hidden caves,\nmonasteries, and the unique Mustang architecture while trekking through Lo\nManthang, the walled city at the heart of Upper Mustang.\nThis Mustang trekking itinerary is ideal for travelers looking to experience high-\naltitude trekking in Nepal, witness the breathtaking Himalayan views, and\nimmerse themselves in the rich Tibetan-in fl uenced culture. The trek covers\nmoderate distances each day, with manageable altitudes, making it suitable for\nboth novice and experienced trekkers.\nExperience the charm of Mustang’s remote trails, traditional homestays, and\nvibrant local festivals. Our Upper Mustang trek package includes guided tours,\n\naccommodations, and meals, ensuring a hassle-free adventure. Whether you are\na solo traveler, couple, or small group, this short trek provides a once-in-a-lifetime\nHimalayan experience without the need for a long expedition.",
-  "placeCount": 14,
-  "days": 8,
-  "file": "guides/short-upper-mustang-trek-explore.json"
-  },
-  {
   "id": "3-day-iceland-road-trip",
   "title": "3 Day Iceland Road Trip",
   "location": "Ke fl avik",
@@ -43,5 +34,14 @@
   "placeCount": 7,
   "days": null,
   "file": "guides/7-best-things-to-do-in-shanghai-china.json"
+  },
+  {
+  "id": "short-upper-mustang-trek-explore",
+  "title": "Short Upper Mustang Trek | Explore",
+  "location": "Mustang",
+  "description": "Short Upper Mustang Trek Explore Mustang in 7-10 Days\nEmbark on an unforgettable journey through the mystical landscapes of Upper\nMustang with our Short Upper Mustang Trek. Designed for adventure seekers with\nlimited time, this 7-10 day trek o ff ers a perfect blend of Nepal’s cultural heritage,\nancient Tibetan villages, and stunning desert-like scenery. Explore hidden caves,\nmonasteries, and the unique Mustang architecture while trekking through Lo\nManthang, the walled city at the heart of Upper Mustang.\nThis Mustang trekking itinerary is ideal for travelers looking to experience high-\naltitude trekking in Nepal, witness the breathtaking Himalayan views, and\nimmerse themselves in the rich Tibetan-in fl uenced culture. The trek covers\nmoderate distances each day, with manageable altitudes, making it suitable for\nboth novice and experienced trekkers.\nExperience the charm of Mustang’s remote trails, traditional homestays, and\nvibrant local festivals. Our Upper Mustang trek package includes guided tours,\n\naccommodations, and meals, ensuring a hassle-free adventure. Whether you are\na solo traveler, couple, or small group, this short trek provides a once-in-a-lifetime\nHimalayan experience without the need for a long expedition.",
+  "placeCount": 14,
+  "days": 8,
+  "file": "guides/short-upper-mustang-trek-explore.json"
   }
 ]
