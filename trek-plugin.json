@@ -1,0 +1,42 @@
+{
+  "id": "featured-guides",
+  "name": "Featured Guides",
+  "version": "1.10.3",
+  "apiVersion": 1,
+  "author": "raduwolf12",
+  "description": "Curated destination guides enriched with real places to explore, with one-tap add straight into your trip.",
+  "type": "page",
+  "trek": ">=3.4.0 <4.0.0",
+  "nativeModules": false,
+  "permissions": [
+    "db:own",
+    "http:outbound",
+    "http:outbound:*.opentripmap.com",
+    "http:outbound:nominatim.openstreetmap.org",
+    "db:read:trips",
+    "db:write:places",
+    "db:read:collections",
+    "db:create:trips",
+    "db:write:days",
+    "db:write:itinerary",
+    "ai:invoke"
+  ],
+  "requiredAddons": [],
+  "pluginDependencies": [],
+  "icon": "Compass",
+  "egress": [
+    "*.opentripmap.com",
+    "nominatim.openstreetmap.org"
+  ],
+  "settings": [
+    {
+      "key": "opentripmap_api_key",
+      "label": "OpenTripMap API key",
+      "input_type": "password",
+      "scope": "user",
+      "required": false,
+      "secret": true,
+      "hint": "Free key from opentripmap.io — set your own key to search and import places when curating a guide."
+    }
+  ]
+}
