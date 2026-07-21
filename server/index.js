@@ -173,6 +173,28 @@ function guessGuideMetaFromText(text) {
   return { title, location, description };
 }
 
+// TREK's own trip PDF export ("Travel Plan") cover page: a "made with" / "TRAVEL PLAN" kicker
+// (sometimes letter-spaced by the PDF's own font, hence the loose match), then the trip title,
+// a subtitle line, then a date range and DAYS/PLACES/PLANNED stat labels this plugin has no use
+// for — a guide isn't date-scoped the way a trip is. Returns null (letting the caller fall back
+// to guessGuideMetaFromText) when the kicker isn't found, rather than guessing wrong on a
+// non-TREK export.
+function guessTrekPdfMeta(text) {
+  const lines = firstNonEmptyLines(text, 14);
+  const anchorIdx = lines.findIndex((l) => /t\s*r\s*a\s*v\s*e\s*l\s*p\s*l\s*a\s*n/i.test(l.replace(/\s+/g, ' ')));
+  if (anchorIdx === -1) return null;
+  const title = (lines[anchorIdx + 1] || 'Imported guide').slice(0, 200);
+  // The subtitle line right after the title is often just the title again plus a companion tag
+  // ("China - Beijing 2026 with Rasmus") rather than real prose, but it's the closest thing TREK's
+  // export has to a description, and better than leaving it blank.
+  const subtitle = lines[anchorIdx + 2];
+  const description = subtitle && subtitle !== title && !/^\d/.test(subtitle) ? subtitle.slice(0, 2000) : null;
+  // No separate "location" field on this cover — best-effort strip a trailing year off the title
+  // ("China - Beijing 2026" -> "China - Beijing") since that's usually the destination already.
+  const location = title.replace(/\s*\d{4}\s*$/, '').trim().slice(0, 200) || null;
+  return { title, location, description };
+}
+
 // ---- Static (no-AI) fallback extraction ----
 // Mindtrip's own export layout is consistent enough to parse deterministically: a place entry
 // is a NAME line immediately followed by a line that's exactly one of a known category word —
@@ -334,6 +356,8 @@ function sanitizePdfPlace(raw) {
   const name = raw.name && String(raw.name).trim().slice(0, 200);
   if (!name) return null;
   const dayNumber = Number(raw.dayNumber);
+  const lat = Number(raw.lat);
+  const lon = Number(raw.lon);
   return {
     name,
     category: raw.category ? String(raw.category).trim().slice(0, 100) : null,
@@ -345,6 +369,11 @@ function sanitizePdfPlace(raw) {
     // places never carry this, since PDF_PLACE_SCHEMA has no such field. insertPdfPlaceBlocks
     // reads it off whichever place is first for a given day to title that day's block.
     dayTitle: raw.dayTitle ? String(raw.dayTitle).trim().slice(0, 200) : null,
+    // Only ever set by extractPlacesFromTrekPdf — a TREK-native export already prints each
+    // place's real coordinates, so geocodePlacesViaOtm/geocodeMissingByAddress (which both skip
+    // anything that already has lat/lon) never need to touch these at all.
+    lat: Number.isFinite(lat) ? lat : null,
+    lon: Number.isFinite(lon) ? lon : null,
   };
 }
 
@@ -486,8 +515,17 @@ async function geocodeMissingByAddress(places) {
 
 // Runs the admin's AI provider (or the deterministic static fallback) over one chunk of
 // extracted PDF text — shared by the initial /guide/import-pdf call and every subsequent
-// /guide/import-pdf/append chunk of the same import.
+// /guide/import-pdf/append chunk of the same import. Tries the TREK-native parser first (see
+// extractPlacesFromTrekPdf) since it's strictly better than either AI or the Mindtrip static
+// parser when it applies (real coordinates, exact category words, no AI provider even needed);
+// only falls through to the existing AI-or-static path when this chunk's text doesn't match that
+// format at all.
 async function extractPdfPlacesChunk(ctx, text) {
+  const trekPlaces = extractPlacesFromTrekPdf(text).map(sanitizePdfPlace).filter(Boolean);
+  if (trekPlaces.length) {
+    return { places: trekPlaces, usedAi: false, aiFallbackReason: null, parsedAs: 'trek' };
+  }
+
   let places, usedAi = false, aiFallbackReason = null;
   if (ctx.ai) {
     try {
@@ -502,7 +540,7 @@ async function extractPdfPlacesChunk(ctx, text) {
     aiFallbackReason = 'This TREK instance does not support ai:invoke.';
   }
   if (!usedAi) places = extractPlacesStatically(text).map(sanitizePdfPlace).filter(Boolean);
-  return { places, usedAi, aiFallbackReason };
+  return { places, usedAi, aiFallbackReason, parsedAs: usedAi ? 'ai' : 'static' };
 }
 
 // Inserts one chunk's extracted places (and the day-header blocks between them) starting at
@@ -590,6 +628,40 @@ function collectionPlaceRow(p) {
   };
 }
 
+// Defensively read a place object back from ctx.trips.getPlaces() — per the SDK's own docs,
+// "only `id` is guaranteed; every shape mirrors the raw DB row", the exact same uncertainty
+// placeCreateInput's own comment already describes for the WRITE side (which of lat/latitude,
+// lon/lng/longitude actually lands was never documented either) — so probe the same synonym set
+// here for reads. TREK's own trip-PDF export (see extractPlacesFromTrekPdf) prints a category
+// per place using this plugin's own ten-word taxonomy, which is a strong signal the underlying
+// place row already carries a `category` field in that same shape.
+function tripPlaceRow(p) {
+  return {
+    id: p.id,
+    name: p.name || p.title || null,
+    description: p.description || p.notes || null,
+    address: p.address || null,
+    category: p.category || null,
+    lat: typeof p.lat === 'number' ? p.lat : (typeof p.latitude === 'number' ? p.latitude : null),
+    lon: typeof p.lon === 'number' ? p.lon : (typeof p.lng === 'number' ? p.lng : (typeof p.longitude === 'number' ? p.longitude : null)),
+  };
+}
+
+// TREK's own Day objects mirror the raw DB row too, with no field documented for which places are
+// scheduled on that day — probe the plausible key names an itinerary array could live under, each
+// entry being either a bare place id or a place-like object carrying one. Returns [] (rather than
+// guessing wrong) if none of these match, so that day's places just fall back to the trip's
+// unscheduled pool instead of being mis-assigned.
+function dayAssignedPlaceIds(day) {
+  for (const key of ['places', 'itinerary', 'assignments', 'items', 'entries']) {
+    const val = day[key];
+    if (Array.isArray(val)) {
+      return val.map((v) => (v && typeof v === 'object' ? (v.place_id ?? v.placeId ?? v.id) : v)).filter((id) => id != null);
+    }
+  }
+  return [];
+}
+
 const TEMPLATES = ['blank', 'list', 'itinerary'];
 const BLOCK_TYPES = ['day', 'heading', 'body', 'quote', 'divider', 'image', 'link', 'guide', 'activity', 'place'];
 const HEADING_LEVELS = ['normal', 'medium', 'large'];
@@ -630,6 +702,76 @@ function normalizeCategory(raw) {
     if (keywords.some((k) => low.includes(k))) return canonical;
   }
   return 'Other';
+}
+
+// ---- TREK-native "Travel Plan" PDF export parser ----
+// A trip exported straight from TREK itself (Trip -> Export -> PDF) is a rigidly machine-
+// generated layout, unlike Mindtrip's prose-ish export: every place is "<n> <name> <category>" on
+// one line, its full address on the next, and its REAL lat/lon on the one after that — TREK
+// already geocoded it when the place was added to the trip, so no OTM/Nominatim pass is needed at
+// all for places recognized here (both geocodePlacesViaOtm and geocodeMissingByAddress already
+// skip anything that already has lat/lon). The category words are exactly TREK's own ten-item
+// taxonomy, which PLACE_CATEGORIES above was deliberately kept in sync with — matched literally,
+// no normalizeCategory guessing needed either.
+//
+// Detected by trying this parser FIRST and falling back to the AI/Mindtrip-static path only if it
+// finds nothing (see extractPdfPlacesChunk), rather than sniffing the format upfront. A real TREK
+// trip PDF's day pages also carry flight/check-in/check-out/accommodation-summary/booking-note
+// blocks this plugin has no place model for (those are TREK's own reservations/accommodations, a
+// different subsystem, and the hotel itself already shows up as a normal numbered place too) —
+// those lines simply don't match this parser's line patterns and are silently skipped, the same
+// "ignore what we don't recognize" approach the Mindtrip parser already takes with affiliate
+// links and phone numbers.
+const TREK_PDF_CATEGORY_RE = PLACE_CATEGORIES.map((c) => c.replace('/', '\\/')).join('|');
+const TREK_PDF_PLACE_LINE_RE = new RegExp(`^(\\d{1,3})\\s+(.+?)\\s+(${TREK_PDF_CATEGORY_RE})$`);
+const TREK_PDF_COORDS_RE = /^(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)$/;
+const TREK_PDF_DAY_HEADER_RE = /^DAY\s*(\d+)\b/i;
+
+function extractPlacesFromTrekPdf(text) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const places = [];
+  let dayNumber = null;
+  let i = 0;
+  while (i < lines.length) {
+    const dayMatch = lines[i].match(TREK_PDF_DAY_HEADER_RE);
+    if (dayMatch) {
+      // Deliberately not trying to also recover a custom day title/weekday off this same line —
+      // depending on the PDF text extractor, "DAY 2 Arrival day Fri, Apr 3" can come back as one
+      // reconstructed line or split across several in ways that are hard to predict in advance;
+      // the day number alone is the load-bearing part (grouping is purely by block order, not a
+      // stored per-place field), and every "Day N" block is perfectly editable afterward anyway.
+      dayNumber = Number(dayMatch[1]);
+      i++;
+      continue;
+    }
+
+    const placeMatch = lines[i].match(TREK_PDF_PLACE_LINE_RE);
+    const coordsMatch = placeMatch && lines[i + 2] && lines[i + 2].match(TREK_PDF_COORDS_RE);
+    if (placeMatch && lines[i + 1] && coordsMatch) {
+      const name = placeMatch[2].trim();
+      const category = placeMatch[3];
+      const address = lines[i + 1];
+      const lat = Number(coordsMatch[1]);
+      const lon = Number(coordsMatch[2]);
+      let j = i + 3;
+      let description = null;
+      // An optional personal note follows some entries ("Pearl market", "Shit bar") before the
+      // next numbered place or day boundary — at most one line, never real sentence-y prose the
+      // way Mindtrip's export has, so no need for a Mindtrip-style multi-line accumulation loop.
+      if (lines[j] && lines[j].length < 300 && !TREK_PDF_PLACE_LINE_RE.test(lines[j]) && !TREK_PDF_DAY_HEADER_RE.test(lines[j])) {
+        description = lines[j];
+        j++;
+      }
+      places.push({ name, category, address, description, lat, lon, dayNumber });
+      i = j;
+      // Sanity cap against pathological input — generous because a real TREK trip legitimately
+      // can have this many: the sample this parser was built against has 101 places over 12 days.
+      if (places.length >= 600) break;
+      continue;
+    }
+    i++;
+  }
+  return places;
 }
 
 function guideRow(row) {
@@ -1797,10 +1939,11 @@ module.exports = definePlugin({
         const truncated = rawText.length > MAX_PDF_TEXT_CHARS;
         const text = truncated ? rawText.slice(0, MAX_PDF_TEXT_CHARS) : rawText;
 
-        const meta = guessGuideMetaFromText(text);
-        const { places, usedAi, aiFallbackReason } = await extractPdfPlacesChunk(ctx, text);
+        const meta = guessTrekPdfMeta(text) || guessGuideMetaFromText(text);
+        const { places, usedAi, aiFallbackReason, parsedAs } = await extractPdfPlacesChunk(ctx, text);
         // Two passes: OTM name-match first (cheap, one sweep covers every place at once), then
-        // Nominatim address lookup for whatever's still uncoordinated afterward.
+        // Nominatim address lookup for whatever's still uncoordinated afterward. Both skip any
+        // place that already has lat/lon — which every place parsedAs 'trek' already does.
         const otmMatched = await geocodePlacesViaOtm(ctx, places, meta.location || meta.title);
         const addrGeocode = await geocodeMissingByAddress(places);
         const geocodedCount = otmMatched + addrGeocode.matched;
@@ -1823,6 +1966,7 @@ module.exports = definePlugin({
           truncated,
           usedAi,
           aiFallbackReason: usedAi ? null : aiFallbackReason,
+          parsedAs,
           geocodedCount,
         });
       },
@@ -1849,7 +1993,7 @@ module.exports = definePlugin({
         const existing = await ctx.db.query('SELECT id, title, location FROM guides WHERE id = ?', guideId);
         if (!existing.length) return error(404, 'Guide not found');
 
-        const { places, usedAi, aiFallbackReason } = await extractPdfPlacesChunk(ctx, text);
+        const { places, usedAi, aiFallbackReason, parsedAs } = await extractPdfPlacesChunk(ctx, text);
         const otmMatched = await geocodePlacesViaOtm(ctx, places, existing[0].location || existing[0].title);
         const addrGeocode = await geocodeMissingByAddress(places);
         const geocodedCount = otmMatched + addrGeocode.matched;
@@ -1863,7 +2007,104 @@ module.exports = definePlugin({
           truncated,
           usedAi,
           aiFallbackReason: usedAi ? null : aiFallbackReason,
+          parsedAs,
           geocodedCount,
+        });
+      },
+    },
+    {
+      // Converts one of the admin's own TREK trips directly into a guide — no PDF export/upload
+      // round-trip needed. ctx.trips.getPlaces/getDays are both read-only and already covered by
+      // the db:read:trips permission this plugin already holds (no manifest change needed). Real
+      // coordinates and categories come straight off the trip's own places, same as a TREK-native
+      // PDF import — no geocoding pass needed here either.
+      //
+      // Less battle-tested than the PDF path: TREK's own Place/Day objects "mirror the raw DB
+      // row" per the SDK docs, with only `.id` actually guaranteed — tripPlaceRow/
+      // dayAssignedPlaceIds defensively probe several plausible field names for coordinates and
+      // day assignment (the same uncertainty placeCreateInput's own comment already flags for the
+      // write side), but which of those actually matches a given TREK version isn't confirmed
+      // against a real instance yet. Worst case if none of them match: every place still comes in
+      // (the pool read is guaranteed), just without day grouping or coordinates, as a "List"
+      // guide instead of an "Itinerary" one.
+      method: 'POST', path: '/guide/import-trip', auth: true,
+      async handler(req, ctx) {
+        const denied = requireAdmin(req); if (denied) return denied;
+        const b = req.body || {};
+        const tripId = Number(b.tripId);
+        if (!Number.isInteger(tripId)) return error(400, 'tripId is required');
+
+        let trip;
+        try {
+          trip = await ctx.trips.getById(tripId);
+        } catch (e) {
+          return error(403, "You don't have access to that trip.");
+        }
+        if (!trip) return error(404, 'Trip not found');
+
+        let rawPlaces;
+        try {
+          rawPlaces = toArray(await ctx.trips.getPlaces(tripId));
+        } catch (e) {
+          return error(502, "Could not read that trip's places: " + String(e && e.message || e));
+        }
+        let rawDays;
+        try {
+          rawDays = toArray(await ctx.trips.getDays(tripId));
+        } catch {
+          rawDays = []; // non-fatal — the guide just comes in as a flat, unscheduled list instead
+        }
+
+        const places = rawPlaces.map(tripPlaceRow).filter((p) => p.name);
+        rawDays.sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+
+        const dayNumberByPlaceId = {};
+        const dayTitleByNumber = {};
+        rawDays.forEach((d, i) => {
+          const dayNumber = i + 1;
+          const title = d.title || d.note || d.name;
+          if (title) dayTitleByNumber[dayNumber] = String(title).trim().slice(0, 200);
+          for (const placeId of dayAssignedPlaceIds(d)) dayNumberByPlaceId[placeId] = dayNumber;
+        });
+
+        const asPlaces = places.map((p) => {
+          const dayNumber = p.id != null && dayNumberByPlaceId[p.id] != null ? dayNumberByPlaceId[p.id] : null;
+          return {
+            name: p.name, category: p.category, address: p.address, description: p.description,
+            lat: p.lat, lon: p.lon, dayNumber,
+            dayTitle: dayNumber != null ? (dayTitleByNumber[dayNumber] || null) : null,
+          };
+        });
+        // Keep the trip's own day order (assigned places grouped by day, in date order);
+        // unscheduled places (no day match found) are appended at the end rather than dropped —
+        // the same "still included, just not scheduled" fallback /guide/plan-trip already uses
+        // in the opposite direction (guide -> trip) when a place falls outside the chosen dates.
+        asPlaces.sort((a, b) => {
+          if (a.dayNumber == null && b.dayNumber == null) return 0;
+          if (a.dayNumber == null) return 1;
+          if (b.dayNumber == null) return -1;
+          return a.dayNumber - b.dayNumber;
+        });
+
+        const sanitized = asPlaces.map(sanitizePdfPlace).filter(Boolean);
+        const hasDays = sanitized.some((p) => p.dayNumber != null);
+        const title = (trip.title && String(trip.title).trim().slice(0, 200)) || 'Imported trip';
+        const location = trip.location ? String(trip.location).trim().slice(0, 200) : null;
+
+        await ctx.db.exec(
+          'INSERT INTO guides (title, location, description, template) VALUES (?, ?, ?, ?)',
+          title, location, null, hasDays ? 'itinerary' : 'list'
+        );
+        const guideRows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
+        const guide = guideRows[0];
+
+        const result = await insertPdfPlaceBlocks(ctx, guide.id, sanitized, 0, null);
+
+        return json(201, {
+          guide: guideRow(guide),
+          placeCount: result.placesInserted,
+          dayCount: result.dayBlocksInserted,
+          totalTripPlaces: places.length,
         });
       },
     },

@@ -97,10 +97,18 @@ only a non-interactive static image would be possible, and this plugin
 doesn't attempt one.
 
 **Import a guide from PDF** — built for Mindtrip-style "inspiration" exports
-and similar trip-guide PDFs. An admin picks a PDF; the text is extracted
-right there in the browser (a bundled PDF reader — the file itself never
-leaves the iframe), then structured into a guide using the admin's own
-configured AI provider. If no AI provider is available — not configured,
+and similar trip-guide PDFs, and for a trip exported straight from **TREK
+itself** (Trip → Export → PDF). A TREK export is recognized and parsed
+directly — no AI needed, and no guessing at coordinates: every place already
+carries its real lat/lon and one of this plugin's own ten place categories,
+straight off the export, so it lands with accurate coordinates from the
+start. Flight/check-in/check-out/accommodation-summary/booking-note sections
+in a TREK export aren't imported (those are trip bookings, not places — the
+hotel itself still comes in as a normal place). An admin picks a PDF; the
+text is extracted right there in the browser (a bundled PDF reader — the
+file itself never leaves the iframe), then, for anything that isn't a TREK
+export, structured into a guide using the admin's own configured AI
+provider. If no AI provider is available — not configured,
 or this TREK instance doesn't support it — it automatically falls back to a
 deterministic, no-AI text parser that recognizes the same place/category/
 address pattern these exports use — including entries with no explicit
@@ -134,6 +142,17 @@ resolve) can be fixed retroactively — **Manage guides → open a guide** shows
 **Find missing coordinates** button whenever it has any place still lacking
 one.
 
+**Import a guide from a trip** — a **From a trip** button on the
+guide-management screen skips the PDF step entirely: pick one of your own
+trips and its places (real coordinates and categories included) come
+straight in as a new Draft guide, grouped by day where TREK's own itinerary
+already has an assignment. This reads trip data directly through TREK's own
+`ctx.trips` API — no new permission needed beyond what "Add to trip" already
+uses. It's newer and less exercised than the PDF path: worst case, if a
+particular TREK version's data doesn't match what this plugin expects, every
+place still comes in (that part's guaranteed), just without day grouping or
+coordinates, as a "List" guide instead of an "Itinerary" one.
+
 **Marketplace** — a **Marketplace** button on the guide-management screen
 lists ready-made guides published for anyone using this plugin, fetched
 straight from a public GitHub repo (no server round-trip, no account needed).
@@ -165,6 +184,18 @@ instance with a whole starter library at once. One malformed entry in
 `index.json` — a typo, a bad merge — is skipped on its own rather than
 breaking the entire list for everyone.
 
+A second **Templates** tab in the same modal (same search, filter, preview,
+and bulk-import machinery) offers reusable starting *skeletons* instead of
+complete guides — a day structure or section layout with a few placeholder
+"Example:" places already in place, meant to be imported over and over for
+different trips rather than tracked as "already imported." Four ship with
+this plugin out of the box: a 3-day **Weekend City Break**, a category-
+grouped **Foodie Guide**, a 5-day **Road Trip Itinerary** with a driving note
+for each leg, and a day-less **Inspiration Board** for gathering ideas before
+you've committed to dates. Contributing your own works the same way as a
+guide, just saved under `marketplace/templates/` with its own `index.json`
+instead of `marketplace/guides/`.
+
 ## Screenshots
 
 Show it in context. Commit a `docs/screenshot.png` — it's what the store card
@@ -180,7 +211,7 @@ looks best (the card crops the edges).
 | `http:outbound:*.opentripmap.com` | Lets an admin's guide-editing search reach the OpenTripMap API (and its own thumbnail-image host) to look up destinations, points of interest, and photos, using that admin's own key. |
 | `http:outbound:nominatim.openstreetmap.org` | Lets an imported place that OpenTripMap couldn't match get geocoded from its address instead, via OpenStreetMap's free Nominatim service — no key needed, and it's only ever used as a fallback for places OpenTripMap's own sweep already missed. |
 | `http:outbound:raw.githubusercontent.com` | Lets the guide **Marketplace** list and import ready-made guides published as plain JSON in a public GitHub repo — no key or account needed, and nothing is sent there; it's read-only. |
-| `db:read:trips` | Lists the signed-in user's own trips so they can pick which one to add a place into. |
+| `db:read:trips` | Lists the signed-in user's own trips so they can pick which one to add a place into, or (for an admin) which one to import as a new guide. |
 | `db:write:places` | Creates the selected place inside the chosen trip's place pool when a user clicks "Add to trip" or "Plan a trip". |
 | `db:read:collections` | Lets an admin browse their own saved Collections and pull a place from one straight into a guide. |
 | `db:write:collections` | Lets **Save to Collection** save a guide's places into one of your own Collections, new or existing. |

@@ -803,9 +803,28 @@ body.trek-ui {
     .form-grid .full { grid-column: 1 / -1; }
     .field-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; display: block; }
 
-    .admin-guide-row { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border-faint);
-      border-radius: var(--radius-md); margin-bottom: 8px; background: var(--bg-card); }
-    .admin-guide-row .title { flex: 1; font-size: 14px; font-weight: 600; }
+    .admin-guide-row {
+      display: flex; align-items: stretch; border: 1px solid var(--border-faint); overflow: hidden;
+      border-radius: var(--radius-md); margin-bottom: 10px; background: var(--bg-card);
+    }
+    .admin-guide-cover {
+      width: 200px; flex-shrink: 0; position: relative; min-height: 84px;
+      display: flex; align-items: flex-end; background-size: cover; background-position: center;
+    }
+    .admin-guide-cover svg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 26px; height: 26px; color: rgba(255,255,255,0.7); }
+    .admin-guide-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .admin-guide-cover .title {
+      position: relative; z-index: 1; color: #fff; font-size: 13px; font-weight: 600; line-height: 1.3;
+      padding: 8px 10px; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .admin-guide-body { display: flex; align-items: center; flex: 1; min-width: 0; gap: 20px; padding: 0 16px; }
+    .admin-guide-stats { display: flex; align-items: center; gap: 22px; flex-shrink: 0; }
+    .admin-guide-stats .stat { text-align: center; min-width: 40px; }
+    .admin-guide-stats .stat strong { display: block; font-size: 16px; font-weight: 700; color: var(--text-primary); }
+    .admin-guide-stats .stat span { display: block; font-size: 10px; font-weight: 600; letter-spacing: 0.05em;
+      text-transform: uppercase; color: var(--text-muted); }
+    .admin-guide-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
     .market-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border-faint);
       border-radius: var(--radius-md); margin-bottom: 8px; background: var(--bg-card); }
     .market-row .market-info { flex: 1; min-width: 0; }
@@ -1141,6 +1160,59 @@ body.trek-ui {
       })
       .catch(function () {
         var box = document.getElementById('tripList');
+        if (box) box.textContent = "Couldn't load your trips — try closing and reopening this.";
+      });
+  }
+
+  // ---------------- Import a guide from one of the admin's own trips ----------------
+  // No PDF/upload round-trip at all — /guide/import-trip reads the trip's places (and, best-
+  // effort, its day-by-day itinerary) straight off TREK's own trip data via ctx.trips, already
+  // covered by the db:read:trips permission this plugin holds for the "Add to trip" picker below.
+  function openImportTripModal() {
+    modalRoot.innerHTML =
+      '<div class="modal-backdrop" id="backdrop">' +
+        '<div class="modal">' +
+          '<h3>Import a guide from a trip</h3>' +
+          '<p class="trek-muted" style="margin:0 0 14px">' +
+            "Pulls one of your own trips' places — with their real coordinates and categories — " +
+            'straight into a new guide, no PDF export needed. The result always lands as a ' +
+            '<strong>Draft</strong> for you to review, edit, and Publish.' +
+          '</p>' +
+          '<div id="importTripList" class="trek-muted">Loading your trips…</div>' +
+          '<div class="btn-row" style="margin-top:14px;justify-content:flex-end">' +
+            '<button class="trek-btn trek-btn--secondary" id="itCancel" type="button">Cancel</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    document.getElementById('backdrop').addEventListener('click', function (e) { if (e.target.id === 'backdrop') closeModal(); });
+    document.getElementById('itCancel').addEventListener('click', closeModal);
+
+    (state.trips ? Promise.resolve(state.trips) : api('/trips').then(function (d) { state.trips = d.trips; return d.trips; }))
+      .then(function (trips) {
+        var box = document.getElementById('importTripList');
+        if (!box) return;
+        if (!trips || !trips.length) { box.textContent = "You don't have any trips yet."; return; }
+        box.innerHTML = trips.map(function (t) {
+          return '<div class="trip-pick"><span>' + esc(t.title) + '</span>' +
+            '<button class="trek-btn trek-btn--primary" data-trip="' + t.id + '" type="button">Import</button></div>';
+        }).join('');
+        box.querySelectorAll('button[data-trip]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var tripId = Number(btn.getAttribute('data-trip'));
+            btn.textContent = 'Importing…'; btn.disabled = true;
+            apiWithRetry('/guide/import-trip', { method: 'POST', body: { tripId: tripId } })
+              .then(function (d) {
+                trek.notify('success', 'Imported "' + d.guide.title + '" as a draft — ' +
+                  d.placeCount + ' of ' + d.totalTripPlaces + ' trip place' + (d.totalTripPlaces === 1 ? '' : 's') + ' added.');
+                closeModal();
+                return loadGuides().then(function () { openGuide(d.guide.id, 'admin-guide'); });
+              })
+              .catch(function () { btn.textContent = 'Import'; btn.disabled = false; });
+          });
+        });
+      })
+      .catch(function () {
+        var box = document.getElementById('importTripList');
         if (box) box.textContent = "Couldn't load your trips — try closing and reopening this.";
       });
   }
@@ -1532,7 +1604,37 @@ body.trek-ui {
   // cross-origin has no such problem). index.json is small and lists what's available; each
   // entry's own file is only fetched when actually imported.
   var MARKETPLACE_BASE = 'https://raw.githubusercontent.com/raduwolf12/featured-guides/main/marketplace/';
-  var MARKETPLACE_INDEX_URL = MARKETPLACE_BASE + 'index.json';
+
+  // Two tabs sharing one modal/fetch/import pipeline — a "guide" entry is a complete, ready-to-
+  // browse destination guide; a "template" entry is a reusable starting skeleton (day structure,
+  // section headings, placeholder places marked "Example:") meant to be imported over and over
+  // for different trips, not a one-off you'd track as "already imported". Each entry's own `file`
+  // already carries its subfolder ("guides/x.json" / "templates/y.json"), so fetchAndImportGuide
+  // and the server's /guide/import-marketplace routes need no mode-awareness at all — only the
+  // index to fetch, the empty-state copy, and whether to show import-state badges differ here.
+  var MARKETPLACE_MODES = {
+    guides: {
+      indexUrl: MARKETPLACE_BASE + 'index.json',
+      label: 'Guide marketplace',
+      intro: 'Ready-made guides you can pull straight into your own library. Each one lands as a <strong>Draft</strong> for you to review, edit, and Publish.',
+      emptyIndex: 'No guides published to the marketplace yet — check back later.',
+      emptyFiltered: 'No guides match your search.',
+      searchPlaceholder: 'Search marketplace guides…',
+      trackImportState: true,
+    },
+    templates: {
+      indexUrl: MARKETPLACE_BASE + 'templates/index.json',
+      label: 'Guide templates',
+      intro: 'Reusable starting points — a day structure or section layout with placeholder ' +
+        '"Example:" places already in place. Import one, then replace the placeholders with your ' +
+        'own real places. Lands as a <strong>Draft</strong> like any other import, and importing ' +
+        'the same template again is expected (it\'s a skeleton, not a one-off).',
+      emptyIndex: 'No templates published yet — check back later.',
+      emptyFiltered: 'No templates match your search.',
+      searchPlaceholder: 'Search templates…',
+      trackImportState: false,
+    },
+  };
 
   // Splits a guide's blocks into pieces no bigger than maxBytes (measured as serialized JSON —
   // a close enough proxy for the wire size that actually crosses the host's request-body proxy)
@@ -1574,7 +1676,8 @@ body.trek-ui {
   // by the marketplace id stamped on import) to tell "already imported" and "update available"
   // apart — an update is never applied in place (that would clobber any edits already made to
   // the local copy); it's just a second, separate import of the newer version.
-  function marketplaceEntryState(e) {
+  function marketplaceEntryState(e, trackImportState) {
+    if (!trackImportState) return { imported: false, needsUpdate: false, existing: null };
     var key = e.id != null ? e.id : null;
     var existing = key != null ? (state.guides || []).find(function (g) { return g.marketplaceId === key; }) : null;
     if (!existing) return { imported: false, needsUpdate: false, existing: null };
@@ -1613,54 +1716,70 @@ body.trek-ui {
       });
   }
 
-  function openMarketplaceModal() {
+  // Keyed by mode, at module scope rather than inside openMarketplaceModal, so each tab's loaded
+  // entries/search/filter/selection survive across calls — without this, "Back to marketplace"
+  // from a preview (which just calls openMarketplaceModal() again) used to re-fetch index.json
+  // from scratch and silently reset everything, every single time. A mode's slot is undefined
+  // until its index has been fetched once this page session; after that, reopening that tab
+  // (including via "Back") reuses it instantly instead of showing "Loading…" again.
+  var marketStateByMode = {};
+  var marketplaceMode = 'guides'; // remembers which tab was last open, across separate modal opens too
+
+  function openMarketplaceModal(mode) {
+    mode = mode === 'templates' ? 'templates' : 'guides';
+    marketplaceMode = mode;
+    var cfg = MARKETPLACE_MODES[mode];
+
     modalRoot.innerHTML =
       '<div class="modal-backdrop" id="backdrop"><div class="modal" style="max-width:680px">' +
-        '<h3>' + ICONS.store + ' Guide marketplace</h3>' +
-        '<p class="trek-muted" style="margin:0 0 14px">' +
-          'Ready-made guides you can pull straight into your own library. Each one lands as a ' +
-          '<strong>Draft</strong> for you to review, edit, and Publish.' +
-        '</p>' +
-        '<div id="marketplaceFilterRow" class="trek-row" style="gap:8px;margin-bottom:0"></div>' +
+        '<h3>' + ICONS.store + ' ' + cfg.label + '</h3>' +
+        '<div class="btn-row" style="gap:8px;margin-bottom:10px">' +
+          '<button class="trek-btn trek-btn--' + (mode === 'guides' ? 'primary' : 'secondary') + '" id="marketTabGuides" type="button">Guides</button>' +
+          '<button class="trek-btn trek-btn--' + (mode === 'templates' ? 'primary' : 'secondary') + '" id="marketTabTemplates" type="button">Templates</button>' +
+        '</div>' +
+        '<p class="trek-muted" style="margin:0 0 14px">' + cfg.intro + '</p>' +
+        '<div id="marketplaceFilterRow" class="btn-row" style="gap:8px;margin-bottom:0"></div>' +
         '<div id="marketplaceBulkRow"></div>' +
         '<div id="marketplaceList">Loading…</div>' +
-        '<div class="trek-row" style="margin-top:14px;justify-content:flex-end">' +
+        '<div class="btn-row" style="margin-top:14px;justify-content:flex-end">' +
           '<button class="trek-btn trek-btn--secondary" id="bfCancel" type="button">Close</button>' +
         '</div>' +
       '</div></div>';
     document.getElementById('backdrop').addEventListener('click', function (e) { if (e.target.id === 'backdrop') closeModal(); });
     document.getElementById('bfCancel').addEventListener('click', closeModal);
+    document.getElementById('marketTabGuides').addEventListener('click', function () { if (mode !== 'guides') openMarketplaceModal('guides'); });
+    document.getElementById('marketTabTemplates').addEventListener('click', function () { if (mode !== 'templates') openMarketplaceModal('templates'); });
 
     var listEl = document.getElementById('marketplaceList');
-    var allEntries = [];
-    var marketSearch = '';
-    var marketLocation = '';
-    var selectedKeys = {};
 
     function visibleEntries() {
-      var q = marketSearch.trim().toLowerCase();
-      return allEntries.filter(function (e) {
-        if (marketLocation && e.location !== marketLocation) return false;
+      var ms = marketStateByMode[mode];
+      var q = ms.search.trim().toLowerCase();
+      return ms.allEntries.filter(function (e) {
+        if (ms.location && e.location !== ms.location) return false;
         if (q && (e.title + ' ' + (e.location || '')).toLowerCase().indexOf(q) === -1) return false;
         return true;
       });
     }
 
     function updateBulkRow() {
-      var count = Object.keys(selectedKeys).filter(function (k) { return selectedKeys[k]; }).length;
+      var ms = marketStateByMode[mode];
+      var count = Object.keys(ms.selectedKeys).filter(function (k) { return ms.selectedKeys[k]; }).length;
       var btn = document.getElementById('marketImportSelected');
       if (btn) { btn.textContent = 'Import selected (' + count + ')'; btn.disabled = count === 0; }
       var selectAll = document.getElementById('marketSelectAll');
       if (selectAll) {
         var visible = visibleEntries();
-        selectAll.checked = visible.length > 0 && visible.every(function (e) { return selectedKeys[marketplaceEntryKey(e)]; });
+        selectAll.checked = visible.length > 0 && visible.every(function (e) { return ms.selectedKeys[marketplaceEntryKey(e)]; });
       }
     }
 
     function renderMarketList() {
+      var ms = marketStateByMode[mode];
       var entries = visibleEntries();
       if (!entries.length) {
-        listEl.innerHTML = '<div class="trek-muted">No guides match your search.</div>';
+        listEl.innerHTML = '<div class="trek-muted">' + esc(cfg.emptyFiltered) + '</div>';
+        updateBulkRow();
         return;
       }
       listEl.innerHTML = entries.map(function (e) {
@@ -1668,19 +1787,19 @@ body.trek-ui {
         var badge = e.days
           ? (e.days + (e.days === 1 ? ' day' : ' days'))
           : (e.placeCount != null ? e.placeCount + (e.placeCount === 1 ? ' place' : ' places') : '');
-        var st = marketplaceEntryState(e);
+        var st = marketplaceEntryState(e, cfg.trackImportState);
         var statusBadge = st.needsUpdate
           ? '<span class="market-badge market-badge--update">Update available</span>'
           : (st.imported ? '<span class="market-badge market-badge--imported">Already imported</span>' : '');
-        var buttonLabel = st.needsUpdate ? 'Update' : (st.imported ? 'Import again' : 'Import');
+        var buttonLabel = !cfg.trackImportState ? 'Use template' : (st.needsUpdate ? 'Update' : (st.imported ? 'Import again' : 'Import'));
         var thumb = e.coverPhoto
           ? '<img class="market-thumb" src="' + esc(e.coverPhoto) + '" alt="" />'
           : '<div class="market-thumb market-thumb--placeholder">' + ICONS.compass + '</div>';
         return '<div class="market-row">' +
-          '<input type="checkbox" class="market-select" data-select-key="' + esc(key) + '"' + (selectedKeys[key] ? ' checked' : '') + ' />' +
+          '<input type="checkbox" class="market-select" data-select-key="' + esc(key) + '"' + (ms.selectedKeys[key] ? ' checked' : '') + ' />' +
           thumb +
           '<div class="market-info">' +
-            '<p class="title">' + esc(e.title || 'Untitled guide') + '</p>' +
+            '<p class="title">' + esc(e.title || 'Untitled') + '</p>' +
             (e.location ? '<div class="loc">' + ICONS.pin + esc(e.location) + '</div>' : '') +
             (e.description ? '<p class="desc">' + esc(e.description).slice(0, 160) + '</p>' : '') +
             '<div class="market-meta">' +
@@ -1698,7 +1817,7 @@ body.trek-ui {
 
       listEl.querySelectorAll('input[data-select-key]').forEach(function (cb) {
         cb.addEventListener('change', function () {
-          selectedKeys[cb.getAttribute('data-select-key')] = cb.checked;
+          ms.selectedKeys[cb.getAttribute('data-select-key')] = cb.checked;
           updateBulkRow();
         });
       });
@@ -1718,8 +1837,8 @@ body.trek-ui {
     }
 
     function importOne(entry, btn) {
-      if (!entry || !entry.file) { trek.notify('error', 'That marketplace entry has no file to import.'); return; }
-      var wasUpdate = marketplaceEntryState(entry).needsUpdate;
+      if (!entry || !entry.file) { trek.notify('error', 'That entry has no file to import.'); return; }
+      var wasUpdate = cfg.trackImportState && marketplaceEntryState(entry, true).needsUpdate;
       btn.textContent = 'Importing…'; btn.disabled = true;
       fetchAndImportGuide(entry, function (part, total) {
         if (total > 1) btn.textContent = 'Importing… (part ' + part + ' of ' + total + ')';
@@ -1732,13 +1851,14 @@ body.trek-ui {
           return loadGuides().then(function () { openGuide(guideId, 'admin-guide'); });
         })
         .catch(function (e2) {
-          trek.notify('error', (e2 && e2.message) || 'Could not import that guide.');
-          btn.textContent = 'Import'; btn.disabled = false;
+          trek.notify('error', (e2 && e2.message) || 'Could not import that.');
+          btn.textContent = cfg.trackImportState ? 'Import' : 'Use template'; btn.disabled = false;
         });
     }
 
     function importSelected() {
-      var entries = allEntries.filter(function (e) { return selectedKeys[marketplaceEntryKey(e)]; });
+      var ms = marketStateByMode[mode];
+      var entries = ms.allEntries.filter(function (e) { return ms.selectedKeys[marketplaceEntryKey(e)]; });
       if (!entries.length) return;
       var bulkBtn = document.getElementById('marketImportSelected');
       var statusEl = document.getElementById('marketBulkStatus');
@@ -1752,73 +1872,86 @@ body.trek-ui {
           }).then(function () { ok++; }).catch(function () { failed++; });
         });
       }, Promise.resolve()).then(function () {
-        trek.notify('success', 'Imported ' + ok + ' guide' + (ok === 1 ? '' : 's') + (failed ? ', ' + failed + ' failed' : '') + '.');
+        trek.notify('success', 'Imported ' + ok + (ok === 1 ? ' item' : ' items') + (failed ? ', ' + failed + ' failed' : '') + '.');
         closeModal();
         return loadGuides().then(renderAdmin);
       });
     }
 
-    fetch(MARKETPLACE_INDEX_URL)
+    // Builds the filter row + bulk-select row from this mode's already-loaded entries, and
+    // prefills the search box / location filter / "select all" checkbox from whatever the admin
+    // had already set — this is what makes reopening after a preview feel unchanged instead of
+    // silently reset back to blank.
+    function renderChrome() {
+      var ms = marketStateByMode[mode];
+      var locations = Array.from(new Set(ms.allEntries.map(function (e) { return e.location; }).filter(Boolean))).sort();
+      var filterRow = document.getElementById('marketplaceFilterRow');
+      filterRow.innerHTML =
+        '<input class="trek-input search-input" id="marketplaceSearchBox" placeholder="' + esc(cfg.searchPlaceholder) + '" style="flex:2;margin-bottom:12px" value="' + esc(ms.search) + '" />' +
+        (locations.length > 1
+          ? '<select class="trek-select" id="marketplaceLocationFilter" style="flex:1;margin-bottom:12px">' +
+              '<option value="">All locations</option>' +
+              locations.map(function (l) { return '<option value="' + esc(l) + '"' + (ms.location === l ? ' selected' : '') + '>' + esc(l) + '</option>'; }).join('') +
+            '</select>'
+          : '');
+      // Both boxes are created once here and only ever re-render #marketplaceList on input —
+      // never themselves — so typing doesn't lose focus/cursor position (same fix as the main
+      // guide list's own search).
+      document.getElementById('marketplaceSearchBox').addEventListener('input', function () {
+        marketStateByMode[mode].search = this.value;
+        renderMarketList();
+      });
+      var locationFilter = document.getElementById('marketplaceLocationFilter');
+      if (locationFilter) locationFilter.addEventListener('change', function () {
+        marketStateByMode[mode].location = this.value;
+        renderMarketList();
+      });
+
+      document.getElementById('marketplaceBulkRow').innerHTML =
+        '<div class="market-bulk-row">' +
+          '<label class="trek-row" style="gap:6px;align-items:center;flex:1"><input type="checkbox" id="marketSelectAll" /><span class="trek-muted" style="font-size:13px" id="marketBulkStatus">Select all</span></label>' +
+          '<button class="trek-btn trek-btn--secondary" id="marketImportSelected" type="button" disabled>Import selected (0)</button>' +
+        '</div>';
+      document.getElementById('marketSelectAll').addEventListener('change', function () {
+        var checked = this.checked;
+        visibleEntries().forEach(function (e) { marketStateByMode[mode].selectedKeys[marketplaceEntryKey(e)] = checked; });
+        renderMarketList();
+      });
+      document.getElementById('marketImportSelected').addEventListener('click', importSelected);
+    }
+
+    if (marketStateByMode[mode]) {
+      renderChrome();
+      renderMarketList();
+      return;
+    }
+
+    fetch(cfg.indexUrl)
       .then(function (res) {
-        if (res.status === 404) throw new Error('__EMPTY__'); // nothing published to marketplace/index.json yet
+        if (res.status === 404) throw new Error('__EMPTY__'); // nothing published yet at this index
         if (!res.ok) throw new Error("Couldn't reach the marketplace right now — try again in a moment.");
         return res.json();
       })
       .then(function (rawEntries) {
         var entries = (Array.isArray(rawEntries) ? rawEntries : []).filter(function (e, i) {
           if (isValidMarketplaceEntry(e)) return true;
-          console.warn('Skipping malformed marketplace entry at index ' + i + ':', e);
+          console.warn('Skipping malformed ' + mode + ' entry at index ' + i + ':', e);
           return false;
         });
         if (!entries.length) {
-          listEl.innerHTML = '<div class="trek-muted">No guides in the marketplace yet — check back later.</div>';
+          listEl.innerHTML = '<div class="trek-muted">' + esc(cfg.emptyIndex) + '</div>';
           return;
         }
         // Recently-added first when the entry sets addedAt (ISO date strings sort correctly as
         // plain strings); entries without it just keep the index's own order.
         entries.sort(function (a, b) { return String(b.addedAt || '').localeCompare(String(a.addedAt || '')); });
-        allEntries = entries;
-
-        var locations = Array.from(new Set(entries.map(function (e) { return e.location; }).filter(Boolean))).sort();
-        var filterRow = document.getElementById('marketplaceFilterRow');
-        filterRow.innerHTML =
-          '<input class="trek-input search-input" id="marketplaceSearchBox" placeholder="Search marketplace guides…" style="flex:2;margin-bottom:12px" />' +
-          (locations.length > 1
-            ? '<select class="trek-select" id="marketplaceLocationFilter" style="flex:1;margin-bottom:12px">' +
-                '<option value="">All locations</option>' +
-                locations.map(function (l) { return '<option value="' + esc(l) + '">' + esc(l) + '</option>'; }).join('') +
-              '</select>'
-            : '');
-        // Both boxes are created once here and only ever re-render #marketplaceList on input —
-        // never themselves — so typing doesn't lose focus/cursor position (same fix as the main
-        // guide list's own search).
-        document.getElementById('marketplaceSearchBox').addEventListener('input', function () {
-          marketSearch = this.value;
-          renderMarketList();
-        });
-        var locationFilter = document.getElementById('marketplaceLocationFilter');
-        if (locationFilter) locationFilter.addEventListener('change', function () {
-          marketLocation = this.value;
-          renderMarketList();
-        });
-
-        document.getElementById('marketplaceBulkRow').innerHTML =
-          '<div class="market-bulk-row">' +
-            '<label class="trek-row" style="gap:6px;align-items:center;flex:1"><input type="checkbox" id="marketSelectAll" /><span class="trek-muted" style="font-size:13px" id="marketBulkStatus">Select all</span></label>' +
-            '<button class="trek-btn trek-btn--secondary" id="marketImportSelected" type="button" disabled>Import selected (0)</button>' +
-          '</div>';
-        document.getElementById('marketSelectAll').addEventListener('change', function () {
-          var checked = this.checked;
-          visibleEntries().forEach(function (e) { selectedKeys[marketplaceEntryKey(e)] = checked; });
-          renderMarketList();
-        });
-        document.getElementById('marketImportSelected').addEventListener('click', importSelected);
-
+        marketStateByMode[mode] = { allEntries: entries, search: '', location: '', selectedKeys: {} };
+        renderChrome();
         renderMarketList();
       })
       .catch(function (e) {
         listEl.innerHTML = e && e.message === '__EMPTY__'
-          ? '<div class="trek-muted">No guides published to the marketplace yet — check back later.</div>'
+          ? '<div class="trek-muted">' + esc(cfg.emptyIndex) + '</div>'
           : '<div class="trek-muted">' + esc((e && e.message) || 'Could not load the marketplace.') + '</div>';
       });
   }
@@ -1832,7 +1965,7 @@ body.trek-ui {
       '<div class="modal-backdrop" id="pvBackdrop"><div class="modal" style="max-width:600px">' +
         '<h3>' + esc(entry.title || 'Preview') + '</h3>' +
         '<div id="marketPreviewBody" class="trek-muted">Loading…</div>' +
-        '<div class="trek-row" style="margin-top:14px;justify-content:flex-end;gap:8px">' +
+        '<div class="btn-row" style="margin-top:14px;justify-content:flex-end;gap:8px">' +
           '<button class="trek-btn trek-btn--secondary" id="pvBack" type="button">Back to marketplace</button>' +
           '<button class="trek-btn trek-btn--primary" id="pvImport" type="button">' + ICONS.plus + ' Import</button>' +
         '</div>' +
@@ -1961,7 +2094,7 @@ body.trek-ui {
           '<textarea class="trek-textarea" readonly style="min-height:160px;font-family:monospace;font-size:12px" id="guideJsonBox">' + esc(JSON.stringify(payload, null, 2)) + '</textarea>' +
           '<span class="field-label" style="margin-top:10px;display:block">Then add this entry to <code>marketplace/index.json</code> — fill in <code>author</code> yourself first</span>' +
           '<textarea class="trek-textarea" readonly style="min-height:120px;font-family:monospace;font-size:12px" id="entrySnippet">' + esc(JSON.stringify(entry, null, 2)) + '</textarea>' +
-          '<div class="trek-row" style="margin-top:14px;justify-content:flex-end">' +
+          '<div class="btn-row" style="margin-top:14px;justify-content:flex-end">' +
             '<button class="trek-btn trek-btn--primary" id="bfCancel" type="button">Done</button>' +
           '</div>' +
         '</div></div>';
@@ -1979,10 +2112,11 @@ body.trek-ui {
       '<div class="modal-backdrop" id="backdrop"><div class="modal">' +
         '<h3>Import a guide from PDF</h3>' +
         '<p class="trek-muted" style="margin:0 0 14px">' +
-          'Works well with Mindtrip-style "inspiration" exports and similar trip-guide PDFs. ' +
-          'Text and photos are extracted right here in your browser, then structured into a guide ' +
-          'using your own configured AI provider. The result always lands as a <strong>Draft</strong> ' +
-          'for you to review, edit, and Publish.' +
+          'Works with a trip exported straight from TREK itself (real coordinates, no AI needed), ' +
+          'Mindtrip-style "inspiration" exports, and similar trip-guide PDFs. Text and photos are ' +
+          'extracted right here in your browser; a TREK export is parsed directly, anything else is ' +
+          'structured into a guide using your own configured AI provider. The result always lands as ' +
+          'a <strong>Draft</strong> for you to review, edit, and Publish.' +
         '</p>' +
         '<span class="field-label">PDF file</span>' +
         '<input class="trek-input" id="pdfFile" type="file" accept="application/pdf" />' +
@@ -2007,7 +2141,7 @@ body.trek-ui {
       status.textContent = 'Reading PDF…';
       // Accumulated across every chunk of this one import — see chunkPdfText/PDF_TEXT_UPLOAD_CHARS
       // above for why a long PDF is sent as a short sequence of requests instead of one big one.
-      var summary = { guide: null, placeCount: 0, dayCount: 0, geocodedCount: 0, usedAi: false, staticFallback: false, truncated: false };
+      var summary = { guide: null, placeCount: 0, dayCount: 0, geocodedCount: 0, usedAi: false, staticFallback: false, trekNative: false, truncated: false };
       var carryDay = null;
       var thisRun = { cancelled: false };
       run = thisRun;
@@ -2029,8 +2163,8 @@ body.trek-ui {
             return chain.then(function () {
               checkCancelled();
               status.textContent = split.chunks.length > 1
-                ? 'Structuring with AI… (part ' + (idx + 1) + ' of ' + split.chunks.length + ')'
-                : 'Structuring with AI…';
+                ? 'Structuring… (part ' + (idx + 1) + ' of ' + split.chunks.length + ')'
+                : 'Structuring…';
               var call = idx === 0
                 ? apiWithRetry('/guide/import-pdf', { method: 'POST', body: { text: chunk } })
                 : apiWithRetry('/guide/import-pdf/append', { method: 'POST', body: { guideId: summary.guide.id, text: chunk, carryDay: carryDay } });
@@ -2039,7 +2173,9 @@ body.trek-ui {
                 summary.placeCount += d.placeCount;
                 summary.dayCount += d.dayCount;
                 summary.geocodedCount += d.geocodedCount || 0;
-                if (d.usedAi) summary.usedAi = true; else summary.staticFallback = true;
+                if (d.parsedAs === 'trek') summary.trekNative = true;
+                else if (d.usedAi) summary.usedAi = true;
+                else summary.staticFallback = true;
                 if (d.truncated) summary.truncated = true;
                 carryDay = d.lastDay;
               });
@@ -2077,10 +2213,14 @@ body.trek-ui {
         .then(function (photoResult) {
           checkCancelled();
           if (summary.truncated) trek.notify('warning', 'That PDF was long — only the first part was imported.');
-          var how = !summary.staticFallback ? '' : (summary.usedAi
+          // A TREK-native export is recognized and parsed deterministically (see extractPlacesFromTrekPdf
+          // server-side) — no AI involved and nothing to caveat, unlike the Mindtrip-oriented AI/static path.
+          var how = summary.trekNative ? '' : (!summary.staticFallback ? '' : (summary.usedAi
             ? ' (AI structuring failed partway through this PDF — basic text parsing filled in the rest, so review carefully)'
-            : ' (basic text parsing — no AI provider was available, so review this carefully)');
-          var geo = summary.geocodedCount ? ', ' + summary.geocodedCount + ' located on the map automatically' : '';
+            : ' (basic text parsing — no AI provider was available, so review this carefully)'));
+          var geo = summary.trekNative
+            ? ', with real coordinates already included'
+            : (summary.geocodedCount ? ', ' + summary.geocodedCount + ' located on the map automatically' : '');
           var photoNote = photoResult && photoResult.attached
             ? ', ' + photoResult.attached + ' photo' + (photoResult.attached === 1 ? '' : 's') + ' pulled from the PDF'
             : '';
@@ -2505,13 +2645,14 @@ body.trek-ui {
     adminToggleEl.innerHTML =
       '<button class="trek-btn trek-btn--secondary" id="marketplaceBtn" type="button">' + ICONS.store + ' Marketplace</button>' +
       '<button class="trek-btn trek-btn--secondary" id="importPdfBtn" type="button">' + ICONS.upload + ' Import from PDF</button>' +
+      '<button class="trek-btn trek-btn--secondary" id="importTripBtn" type="button">' + ICONS.briefcase + ' From a trip</button>' +
       '<button class="trek-btn trek-btn--secondary" id="backToList" type="button">' + ICONS.back + ' Back to guides</button>';
 
     var showCreateForm = adminCreateFormOpen || !state.guides.length;
     contentEl.innerHTML =
       (showCreateForm
         ? '<div class="trek-glass" style="padding:16px;margin-bottom:20px">' +
-            '<div class="trek-row" style="justify-content:space-between;align-items:flex-start">' +
+            '<div class="btn-row" style="justify-content:space-between;align-items:flex-start">' +
               '<div><div class="trek-title">Configure your guide</div>' +
               '<p class="trek-muted" style="margin:2px 0 14px">Choose a title, location and template for your guide.</p></div>' +
               (state.guides.length ? '<button class="trek-btn trek-btn--secondary" id="cancelCreate" type="button">Cancel</button>' : '') +
@@ -2559,15 +2700,33 @@ body.trek-ui {
         : state.guides;
       if (!visibleGuides.length) { box.innerHTML = '<div class="empty">No guides match your search.</div>'; return; }
       box.innerHTML = visibleGuides.map(function (g) {
+        // No compass placeholder icon here (unlike the public grid's taller card) — this banner
+        // is only ~84px tall, so a centered icon collides with the title text anchored at the
+        // bottom; the gradient plus title alone reads fine at this size.
+        var cover = g.coverPhoto
+          ? '<img src="' + esc(g.coverPhoto) + '" alt="" /><span class="cover-shade"></span>'
+          : '<span class="cover-shade"></span>';
         return '<div class="admin-guide-row">' +
-          '<button class="icon-btn' + (g.featured ? ' icon-btn--featured' : '') + '" data-feature="' + g.id + '" type="button" title="' + (g.featured ? 'Unfeature' : 'Feature — pin to the top of the list') + '">' + ICONS.star + '</button>' +
-          '<span class="title">' + esc(g.title) + (g.location ? ' — ' + esc(g.location) : '') + '</span>' +
-          '<span class="status-chip status-chip--' + g.status + '">' + g.status + '</span>' +
-          '<span class="trek-muted">' + g.placeCount + ' places</span>' +
-          '<button class="icon-btn" data-open="' + g.id + '" type="button" title="Edit guide">' + ICONS.edit + '</button>' +
-          '<button class="icon-btn" data-dup="' + g.id + '" type="button" title="Duplicate guide">' + ICONS.copy + '</button>' +
-          '<button class="icon-btn" data-export="' + g.id + '" type="button" title="Export as JSON (for the marketplace)">' + ICONS.download + '</button>' +
-          '<button class="icon-btn icon-btn--danger" data-del="' + g.id + '" type="button" title="Delete guide">' + ICONS.trash + '</button>' +
+          '<div class="admin-guide-cover" style="' + (g.coverPhoto ? '' : 'background:' + gradientFor(g.title)) + '">' +
+            (g.status === 'draft' ? '<span class="draft-badge">Draft</span>' : '') +
+            (g.featured ? '<span class="featured-badge">' + ICONS.star + ' Featured</span>' : '') +
+            cover +
+            '<span class="title">' + esc(g.title) + (g.location ? ' — ' + esc(g.location) : '') + '</span>' +
+          '</div>' +
+          '<div class="admin-guide-body">' +
+            '<div class="admin-guide-stats">' +
+              '<div class="stat"><strong>' + (g.days || 0) + '</strong><span>' + (g.days === 1 ? 'Day' : 'Days') + '</span></div>' +
+              '<div class="stat"><strong>' + g.placeCount + '</strong><span>' + (g.placeCount === 1 ? 'Place' : 'Places') + '</span></div>' +
+              '<span class="status-chip status-chip--' + g.status + '">' + g.status + '</span>' +
+            '</div>' +
+            '<div class="admin-guide-actions">' +
+              '<button class="icon-btn' + (g.featured ? ' icon-btn--featured' : '') + '" data-feature="' + g.id + '" type="button" title="' + (g.featured ? 'Unfeature' : 'Feature — pin to the top of the list') + '">' + ICONS.star + '</button>' +
+              '<button class="icon-btn" data-open="' + g.id + '" type="button" title="Edit guide">' + ICONS.edit + '</button>' +
+              '<button class="icon-btn" data-dup="' + g.id + '" type="button" title="Duplicate guide">' + ICONS.copy + '</button>' +
+              '<button class="icon-btn" data-export="' + g.id + '" type="button" title="Export as JSON (for the marketplace)">' + ICONS.download + '</button>' +
+              '<button class="icon-btn icon-btn--danger" data-del="' + g.id + '" type="button" title="Delete guide">' + ICONS.trash + '</button>' +
+            '</div>' +
+          '</div>' +
         '</div>';
       }).join('');
       box.querySelectorAll('button[data-open]').forEach(function (b) {
@@ -2618,6 +2777,7 @@ body.trek-ui {
     document.getElementById('backToList').addEventListener('click', function () { state.view = 'list'; render(); });
     document.getElementById('importPdfBtn').addEventListener('click', openImportPdfModal);
     document.getElementById('marketplaceBtn').addEventListener('click', openMarketplaceModal);
+    document.getElementById('importTripBtn').addEventListener('click', openImportTripModal);
     var createGuideBtn = document.getElementById('createGuide');
     if (createGuideBtn) createGuideBtn.addEventListener('click', function () {
       var title = document.getElementById('newTitle').value.trim();
