@@ -33,6 +33,26 @@ function parseTips(raw) {
   return [];
 }
 
+// Freeform guide tags (Adventure, Family-friendly, …) — trimmed, length-capped, deduped
+// case-insensitively (an admin typing "Beach" and "beach" shouldn't produce two filter chips
+// that look identical), capped in count so the filter row on the public list can't grow
+// unbounded from one guide.
+function parseTags(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const t of raw) {
+    if (typeof t !== 'string') continue;
+    const v = t.trim().slice(0, 30);
+    const key = v.toLowerCase();
+    if (!v || seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
 // Takes an already-resolved API key rather than ctx + fetching it itself — ctx.settings.get is
 // itself a ctx.* call subject to the host's per-plugin RPC rate limit, and geocodePlacesViaOtm
 // below can call this many times in one request; resolving the key once per request/route and
@@ -790,6 +810,7 @@ function guideRow(row) {
     updatedAt: row.updated_at,
     marketplaceId: row.marketplace_id || null,
     marketplaceUpdatedAt: row.marketplace_updated_at || null,
+    tags: (() => { try { return JSON.parse(row.tags || '[]'); } catch (e) { return []; } })(),
   };
 }
 
@@ -1053,6 +1074,7 @@ module.exports = definePlugin({
       ALTER TABLE guides ADD COLUMN marketplace_id TEXT;
       ALTER TABLE guides ADD COLUMN marketplace_updated_at TEXT;
     `);
+    await ctx.db.migrate('007_tags', `ALTER TABLE guides ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`);
 
     // One-time data migration: fold the old flat guide_places rows into the new block
     // model, so content created before this update isn't stranded. Guarded by a plain
@@ -1162,9 +1184,10 @@ module.exports = definePlugin({
           dayCount = Number(b.dayCount);
           if (!Number.isInteger(dayCount) || dayCount < 1 || dayCount > 60) return error(400, 'dayCount must be a whole number between 1 and 60 for the itinerary template');
         }
+        const tags = parseTags(b.tags);
         await ctx.db.exec(
-          'INSERT INTO guides (title, location, description, template) VALUES (?, ?, ?, ?)',
-          title.trim(), location || null, description || null, template
+          'INSERT INTO guides (title, location, description, template, tags) VALUES (?, ?, ?, ?, ?)',
+          title.trim(), location || null, description || null, template, JSON.stringify(tags)
         );
         const rows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
         const guide = rows[0];
@@ -1189,9 +1212,10 @@ module.exports = definePlugin({
         if (!existing.length) return error(404, 'Guide not found');
         const template = b.template !== undefined ? b.template : existing[0].template;
         if (!TEMPLATES.includes(template)) return error(400, `template must be one of: ${TEMPLATES.join(', ')}`);
+        const tags = b.tags !== undefined ? parseTags(b.tags) : (() => { try { return JSON.parse(existing[0].tags || '[]'); } catch (e) { return []; } })();
         await ctx.db.exec(
-          `UPDATE guides SET title = ?, location = ?, description = ?, template = ?, updated_at = datetime('now') WHERE id = ?`,
-          title.trim(), location || null, description || null, template, id
+          `UPDATE guides SET title = ?, location = ?, description = ?, template = ?, tags = ?, updated_at = datetime('now') WHERE id = ?`,
+          title.trim(), location || null, description || null, template, JSON.stringify(tags), id
         );
         // Switching to the itinerary template from the edit view (unlike at creation time) never
         // created any Day blocks — an admin could pick "Itinerary", type a day count, save, and
@@ -1267,8 +1291,8 @@ module.exports = definePlugin({
         const src = source[0];
 
         await ctx.db.exec(
-          'INSERT INTO guides (title, location, description, template) VALUES (?, ?, ?, ?)',
-          `${src.title} (Copy)`.slice(0, 200), src.location, src.description, src.template || 'blank'
+          'INSERT INTO guides (title, location, description, template, tags) VALUES (?, ?, ?, ?, ?)',
+          `${src.title} (Copy)`.slice(0, 200), src.location, src.description, src.template || 'blank', src.tags || '[]'
         );
         const newGuideRows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
         const newGuide = newGuideRows[0];

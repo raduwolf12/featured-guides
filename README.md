@@ -55,7 +55,11 @@ otherwise.
 
 Guide detail pages show a sticky timeline strip of pills for every **Day**
 block so travellers can jump straight to a day, alongside a connecting rail
-down the page.
+down the page. Any guide with at least one place or activity that has real
+coordinates also gets a **List / Map toggle**: Map plots every one of those
+on an interactive, pannable/zoomable map (colour-coded by category, same
+palette as the place cards), and clicking a pin jumps straight back to that
+place in the list.
 
 An admin can **Feature** any guide (a star toggle on its row in the
 management list) to pin it to the very top of the browsable list, ahead of
@@ -211,6 +215,7 @@ looks best (the card crops the edges).
 | `http:outbound:*.opentripmap.com` | Lets an admin's guide-editing search reach the OpenTripMap API (and its own thumbnail-image host) to look up destinations, points of interest, and photos, using that admin's own key. |
 | `http:outbound:nominatim.openstreetmap.org` | Lets an imported place that OpenTripMap couldn't match get geocoded from its address instead, via OpenStreetMap's free Nominatim service — no key needed, and it's only ever used as a fallback for places OpenTripMap's own sweep already missed. |
 | `http:outbound:raw.githubusercontent.com` | Lets the guide **Marketplace** list and import ready-made guides published as plain JSON in a public GitHub repo — no key or account needed, and nothing is sent there; it's read-only. |
+| `http:outbound:basemaps.cartocdn.com` | Lets a guide's **Map** view fetch its basemap tiles from CARTO's free, keyless tile service (the same source TREK's own Collections map uses by default) — read-only, no key or account needed. |
 | `db:read:trips` | Lists the signed-in user's own trips so they can pick which one to add a place into, or (for an admin) which one to import as a new guide. |
 | `db:write:places` | Creates the selected place inside the chosen trip's place pool when a user clicks "Add to trip" or "Plan a trip". |
 | `db:read:collections` | Lets an admin browse their own saved Collections and pull a place from one straight into a guide. |
