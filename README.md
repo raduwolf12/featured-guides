@@ -59,7 +59,12 @@ down the page. Any guide with at least one place or activity that has real
 coordinates also gets a **List / Map toggle**: Map plots every one of those
 on an interactive, pannable/zoomable map (colour-coded by category, same
 palette as the place cards), and clicking a pin jumps straight back to that
-place in the list.
+place in the list. When a guide's places span more than one category, a
+filter chip row above the map narrows it down to just one category at a
+time (e.g. only **Restaurant**) — "All" resets back to every pin. On a
+wide-enough screen where the list and map show side by side, hovering a
+place card highlights its pin, and hovering a pin highlights its card —
+a quick way to spot where something is without hunting for it.
 
 An admin can **Feature** any guide (a star toggle on its row in the
 management list) to pin it to the very top of the browsable list, ahead of
@@ -94,11 +99,16 @@ Collection into a guide while curating one. Each individual **Place**/
 **Activity** card also gets its own **Save** button right next to
 **Add to trip**, for saving just that one place instead of the whole guide.
 
-Note: there is deliberately **no live map**. TREK plugins run in a sandboxed
-iframe whose content-security policy blocks loading map tiles from any
-external host, so a pannable/zoomable map isn't something a plugin can do —
-only a non-interactive static image would be possible, and this plugin
-doesn't attempt one.
+Both **Plan a trip** and **Save to Collection** show a real progress bar
+for a large guide instead of a single frozen button — each processes places
+a handful at a time (paced against TREK's own per-plugin rate limit) and
+updates "X of Y" between batches, so a 20+ place guide visibly keeps moving
+instead of looking stuck. The same progress bar shows up everywhere else a
+big operation can take a while, too: importing a large PDF (structuring a
+long extracted text in parts, then attaching its photos), a single
+Marketplace guide big enough to import in several pieces, and the
+Marketplace's own "Import selected" bulk action across several guides at
+once.
 
 **Import a guide from PDF** — built for Mindtrip-style "inspiration" exports
 and similar trip-guide PDFs, and for a trip exported straight from **TREK
@@ -155,7 +165,9 @@ already has an assignment. This reads trip data directly through TREK's own
 uses. It's newer and less exercised than the PDF path: worst case, if a
 particular TREK version's data doesn't match what this plugin expects, every
 place still comes in (that part's guaranteed), just without day grouping or
-coordinates, as a "List" guide instead of an "Itinerary" one.
+coordinates, as a "List" guide instead of an "Itinerary" one. Any flights and
+hotel bookings on the trip come in too, as a short **Travel & Stays** text
+section at the top of the guide, instead of being silently left out.
 
 **Marketplace** — a **Marketplace** button on the guide-management screen
 lists ready-made guides published for anyone using this plugin, fetched
@@ -233,7 +245,9 @@ looks best (the card crops the edges).
    a free API key at [opentripmap.io](https://opentripmap.io/product) and paste
    it into their own **OpenTripMap API key** field on this plugin's settings
    page (per-user — each admin uses their own key; manually-entered places
-   never need one).
+   never need one). A **Test connection** button on that same settings page
+   checks the key right away, instead of only finding out it's wrong on the
+   first search inside a guide.
 3. Open the **Guides** page from the main navigation. Admins see a
    **Manage guides** button to create guides, build their content block by
    block (places by hand, by searching OpenTripMap, or by picking from one of

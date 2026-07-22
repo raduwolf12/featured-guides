@@ -484,6 +484,13 @@ body.trek-ui {
 
     var wrap = document.createElement('div');
     wrap.className = 'trek-select-wrap';
+    // Any inline sizing/layout style meant for the <select> itself (width, max-width,
+    // margin-left: auto for right-alignment in a flex row, etc.) has to move to the wrapper —
+    // .trek-select-native-hidden below forces the real <select> to 1x1px, so an inline style
+    // left on it has no visual effect at all, and the trigger button would size to its
+    // selected option's text instead of whatever layout the caller asked for.
+    var callerStyle = sel.getAttribute('style');
+    if (callerStyle) wrap.setAttribute('style', callerStyle);
     sel.parentNode.insertBefore(wrap, sel);
     wrap.appendChild(sel);
     sel.classList.add('trek-select-native-hidden');
@@ -675,6 +682,14 @@ body.trek-ui {
     .topbar { display: flex; align-items: center; gap: 12px; padding: 16px 24px 4px; }
     .topbar h1 { font-size: 22px; margin: 0; flex: 1; }
     .search-row { padding: 4px 24px 8px; }
+    .guide-search-row { display: flex; align-items: center; gap: 10px; }
+    @media (max-width: 639px) {
+      /* A fixed-width sort dropdown beside the search box works on desktop, but on a phone-width
+         screen it leaves the search input too cramped to type into comfortably — stack them
+         instead, each full width. */
+      .guide-search-row { flex-direction: column; align-items: stretch; }
+      .guide-search-row .trek-select-wrap { width: 100% !important; }
+    }
     .search-input { width: 100%; max-width: 480px; }
 
     .grid {
@@ -1668,6 +1683,15 @@ svg.leaflet-image-layer.leaflet-interactive path {
     /* List/Map toggle reuses the exact .timeline-pill look (see the app CSS above) so it
        reads as one family with the day pills rather than a second, differently-styled control. */
     .guide-map-wrap { margin-top: 4px; }
+    .batch-progress { margin-top: 12px; }
+    .batch-progress-track { height: 6px; border-radius: 999px; background: var(--bg-hover); overflow: hidden; }
+    .batch-progress-fill { height: 100%; width: 0%; border-radius: 999px; background: var(--accent); transition: width .25s ease; }
+    .batch-progress-text { font-size: 12px; margin-top: 6px; }
+    .market-row-progress { height: 3px; border-radius: 999px; background: var(--bg-hover); overflow: hidden; margin-top: 6px; }
+    .market-row-progress-fill { height: 100%; width: 0%; border-radius: 999px; background: var(--accent); transition: width .2s ease; }
+    .map-category-filter { margin-bottom: 10px; }
+    .map-category-filter .timeline-pill { display: inline-flex; align-items: center; gap: 6px; }
+    .map-category-filter .cat-dot { width: 7px; height: 7px; display: inline-block; }
     .guide-map {
       height: 420px; border-radius: var(--radius-lg); overflow: hidden;
       border: 1px solid var(--border-faint);
@@ -1728,6 +1752,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
     /* Brief highlight when a map pin jumps the list to its place card. */
     @keyframes place-card-flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: none; } }
     .place-card--flash { animation: place-card-flash 1.1s ease-out; }
+    /* Steady (non-animated) highlight while hovering a card or its pin — the other half of the
+       click link above, see highlightMapMarker/highlightPlaceCard. */
+    .place-card--map-hover { box-shadow: 0 0 0 2px var(--accent); }
     @media (max-width: 639px) {
       .guide-map { height: 300px; }
     }
@@ -1866,9 +1893,24 @@ svg.leaflet-image-layer.leaflet-interactive path {
   // change, a re-publish, …), so rather than trying to keep an existing map's markers in sync
   // with data that may have changed underneath it, destroyGuideMap() tears it down every time
   // and initGuideMap() lazily builds a fresh one the first time "Map" is actually clicked.
-  var guideMapState = { map: null };
+  var guideMapState = { map: null, markersByPlaceId: {} };
   function destroyGuideMap() {
     if (guideMapState.map) { try { guideMapState.map.remove(); } catch (e) {} guideMapState.map = null; }
+    guideMapState.markersByPlaceId = {};
+  }
+  // Two-way hover link between a place card and its pin — the click link (pin -> scroll to card)
+  // already existed; this is the other direction (and, symmetrically, hovering a pin's marker
+  // now also highlights its card, wired below in the places.forEach loop). Both are pure visual
+  // toggles, no scrolling — only a click does that.
+  function highlightMapMarker(placeId, on) {
+    var marker = guideMapState.markersByPlaceId[placeId];
+    var el = marker && marker.getElement && marker.getElement();
+    var dot = el && el.querySelector('.guide-map-marker');
+    if (dot) dot.classList.toggle('guide-map-marker--selected', on);
+  }
+  function highlightPlaceCard(placeId, on) {
+    var card = document.getElementById('place-' + placeId);
+    if (card) card.classList.toggle('place-card--map-hover', on);
   }
   function initGuideMap(container, places, onMarkerClick) {
     if (guideMapState.map) { guideMapState.map.invalidateSize(); return; } // just re-showing it
@@ -1887,6 +1929,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
       var marker = L.marker([p.lat, p.lon], { icon: guideMapMarkerIcon(p.category) }).addTo(map);
       marker.bindPopup('<div class="map-popup-name">' + esc(p.name) + '</div>' + categoryChipHtml(p.category));
       marker.on('click', function () { if (onMarkerClick) onMarkerClick(p.id); });
+      marker.on('mouseover', function () { highlightPlaceCard(p.id, true); });
+      marker.on('mouseout', function () { highlightPlaceCard(p.id, false); });
+      guideMapState.markersByPlaceId[p.id] = marker;
     });
     if (places.length === 1) { map.setView([places[0].lat, places[0].lon], 13); }
     else { map.fitBounds(L.latLngBounds(places.map(function (p) { return [p.lat, p.lon]; })), { padding: [28, 28], maxZoom: 15 }); }
@@ -2123,8 +2168,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
             btn.textContent = 'Importing…'; btn.disabled = true;
             apiWithRetry('/guide/import-trip', { method: 'POST', body: { tripId: tripId } })
               .then(function (d) {
+                var bookingNote = d.bookingCount ? ', plus ' + d.bookingCount + ' flight/hotel booking' + (d.bookingCount === 1 ? '' : 's') + ' as a Travel & Stays section' : '';
                 trek.notify('success', 'Imported "' + d.guide.title + '" as a draft — ' +
-                  d.placeCount + ' of ' + d.totalTripPlaces + ' trip place' + (d.totalTripPlaces === 1 ? '' : 's') + ' added.');
+                  d.placeCount + ' of ' + d.totalTripPlaces + ' trip place' + (d.totalTripPlaces === 1 ? '' : 's') + ' added' + bookingNote + '.');
                 closeModal();
                 return loadGuides().then(function () { openGuide(d.guide.id, 'admin-guide'); });
               })
@@ -2749,9 +2795,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
               (e.author ? '<span class="trek-muted" style="font-size:12px">by ' + esc(e.author) + '</span>' : '') +
               statusBadge +
             '</div>' +
+            '<div class="market-row-progress" style="display:none"><div class="market-row-progress-fill"></div></div>' +
           '</div>' +
           '<div class="market-actions">' +
-            '<button class="icon-btn" data-preview-key="' + esc(key) + '" type="button" title="Preview">' + ICONS.eye + '</button>' +
+            '<button class="icon-btn" data-preview-key="' + esc(key) + '" type="button" title="Preview" aria-label="Preview “' + esc(e.title || 'Untitled') + '”">' + ICONS.eye + '</button>' +
             '<button class="trek-btn trek-btn--primary" data-import-key="' + esc(key) + '" type="button">' + ICONS.plus + ' ' + buttonLabel + '</button>' +
           '</div>' +
         '</div>';
@@ -2781,9 +2828,18 @@ svg.leaflet-image-layer.leaflet-interactive path {
     function importOne(entry, btn) {
       if (!entry || !entry.file) { trek.notify('error', 'That entry has no file to import.'); return; }
       var wasUpdate = cfg.trackImportState && marketplaceEntryState(entry, true).needsUpdate;
+      var rowProgress = btn.closest('.market-row').querySelector('.market-row-progress');
+      var rowProgressFill = rowProgress ? rowProgress.querySelector('.market-row-progress-fill') : null;
       btn.textContent = 'Importing…'; btn.disabled = true;
       fetchAndImportGuide(entry, function (part, total) {
-        if (total > 1) btn.textContent = 'Importing… (part ' + part + ' of ' + total + ')';
+        // Most entries import in a single request — the row's own bar only shows up for the
+        // (photo-heavy) ones that actually span more than one, same threshold the button-text
+        // fallback already used, so a plain import never grows a bar it doesn't need.
+        if (total > 1 && rowProgress) {
+          btn.textContent = 'Importing… (part ' + part + ' of ' + total + ')';
+          rowProgress.style.display = '';
+          rowProgressFill.style.width = Math.round((part / total) * 100) + '%';
+        }
       })
         .then(function (guideId) {
           trek.notify('success', wasUpdate
@@ -2795,6 +2851,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         .catch(function (e2) {
           trek.notify('error', (e2 && e2.message) || 'Could not import that.');
           btn.textContent = cfg.trackImportState ? 'Import' : 'Use template'; btn.disabled = false;
+          if (rowProgress) rowProgress.style.display = 'none';
         });
     }
 
@@ -2806,12 +2863,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
       var statusEl = document.getElementById('marketBulkStatus');
       bulkBtn.disabled = true;
       var ok = 0, failed = 0;
+      showBatchProgress('marketBulk', 'Importing guides… ', 0, entries.length);
       entries.reduce(function (chain, entry, i) {
         return chain.then(function () {
           statusEl.textContent = 'Importing ' + (i + 1) + ' of ' + entries.length + ': ' + entry.title + '…';
           return fetchAndImportGuide(entry, function (part, total) {
             if (total > 1) statusEl.textContent = 'Importing ' + (i + 1) + ' of ' + entries.length + ': ' + entry.title + ' (part ' + part + ' of ' + total + ')…';
-          }).then(function () { ok++; }).catch(function () { failed++; });
+          }).then(function () { ok++; }).catch(function () { failed++; })
+            .then(function () { showBatchProgress('marketBulk', 'Importing guides… ', i + 1, entries.length); });
         });
       }, Promise.resolve()).then(function () {
         trek.notify('success', 'Imported ' + ok + (ok === 1 ? ' item' : ' items') + (failed ? ', ' + failed + ' failed' : '') + '.');
@@ -2853,7 +2912,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
         '<div class="market-bulk-row">' +
           '<label class="trek-row" style="gap:6px;align-items:center;flex:1"><input type="checkbox" id="marketSelectAll" /><span class="trek-muted" style="font-size:13px" id="marketBulkStatus">Select all</span></label>' +
           '<button class="trek-btn trek-btn--secondary" id="marketImportSelected" type="button" disabled>Import selected (0)</button>' +
-        '</div>';
+        '</div>' +
+        batchProgressHtml('marketBulk');
       document.getElementById('marketSelectAll').addEventListener('change', function () {
         var checked = this.checked;
         visibleEntries().forEach(function (e) { marketStateByMode[mode].selectedKeys[marketplaceEntryKey(e)] = checked; });
@@ -3063,6 +3123,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         '<span class="field-label">PDF file</span>' +
         '<input class="trek-input" id="pdfFile" type="file" accept="application/pdf" />' +
         '<div id="pdfStatus" class="trek-muted" style="margin-top:10px"></div>' +
+        batchProgressHtml('pdf') +
         '<div class="btn-row" style="margin-top:14px;justify-content:flex-end;gap:8px">' +
           '<button class="trek-btn trek-btn--secondary" id="pdfCancel" type="button">Cancel</button>' +
         '</div>' +
@@ -3081,6 +3142,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       if (!file) return;
       var status = document.getElementById('pdfStatus');
       status.textContent = 'Reading PDF…';
+      hideBatchProgress('pdf');
       // Accumulated across every chunk of this one import — see chunkPdfText/PDF_TEXT_UPLOAD_CHARS
       // above for why a long PDF is sent as a short sequence of requests instead of one big one.
       var summary = { guide: null, placeCount: 0, dayCount: 0, geocodedCount: 0, usedAi: false, staticFallback: false, trekNative: false, truncated: false };
@@ -3104,13 +3166,13 @@ svg.leaflet-image-layer.leaflet-interactive path {
           return split.chunks.reduce(function (chain, chunk, idx) {
             return chain.then(function () {
               checkCancelled();
-              status.textContent = split.chunks.length > 1
-                ? 'Structuring… (part ' + (idx + 1) + ' of ' + split.chunks.length + ')'
-                : 'Structuring…';
+              status.textContent = 'Structuring…';
+              if (split.chunks.length === 1) hideBatchProgress('pdf');
               var call = idx === 0
                 ? apiWithRetry('/guide/import-pdf', { method: 'POST', body: { text: chunk } })
                 : apiWithRetry('/guide/import-pdf/append', { method: 'POST', body: { guideId: summary.guide.id, text: chunk, carryDay: carryDay } });
               return call.then(function (d) {
+                if (split.chunks.length > 1) showBatchProgress('pdf', 'Structuring… ', idx + 1, split.chunks.length);
                 if (idx === 0) summary.guide = d.guide;
                 summary.placeCount += d.placeCount;
                 summary.dayCount += d.dayCount;
@@ -3142,6 +3204,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         .then(function () {
           checkCancelled();
           status.textContent = 'Looking for photos…';
+          hideBatchProgress('pdf');
           return extractPdfPhotosSafe(file);
         })
         .then(function (photos) {
@@ -3149,7 +3212,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
           if (!photos.hero && !photos.placePhotos.length) return { attached: 0 };
           status.textContent = 'Attaching photos…';
           return attachPdfPhotosToGuide(summary.guide.id, photos, function (done, total) {
-            status.textContent = 'Attaching photos… (' + done + '/' + total + ')';
+            showBatchProgress('pdf', 'Attaching photos… ', done, total);
           }, function () { return thisRun.cancelled; });
         })
         .then(function (photoResult) {
@@ -3183,10 +3246,37 @@ svg.leaflet-image-layer.leaflet-interactive path {
             return;
           }
           status.textContent = (e && e.message) || 'Could not import that PDF.';
+          hideBatchProgress('pdf');
           var fileInput = document.getElementById('pdfFile');
           if (fileInput) fileInput.disabled = false;
         });
     });
+  }
+
+  // ---------------- Batch progress (plan-a-trip / save-to-collection) ----------------
+  // /guide/plan-trip and /guide/export-to-collection each process a big per-item ctx.* loop
+  // one small batch per call (paced server-side against the host's rate limit — see
+  // BULK_CTX_BATCH_SIZE server-side), so a large guide can take several round trips. This bar
+  // is what turns that into visible progress instead of a single frozen "Creating…" button.
+  function batchProgressHtml(idPrefix) {
+    return '<div class="batch-progress" id="' + idPrefix + 'Progress" style="display:none">' +
+      '<div class="batch-progress-track"><div class="batch-progress-fill" id="' + idPrefix + 'ProgressFill"></div></div>' +
+      '<div class="trek-muted batch-progress-text" id="' + idPrefix + 'ProgressText"></div>' +
+    '</div>';
+  }
+  function showBatchProgress(idPrefix, label, completed, total) {
+    var wrap = document.getElementById(idPrefix + 'Progress');
+    if (!wrap) return;
+    wrap.style.display = '';
+    var pct = total > 0 ? Math.round((completed / total) * 100) : 100;
+    document.getElementById(idPrefix + 'ProgressFill').style.width = pct + '%';
+    document.getElementById(idPrefix + 'ProgressText').textContent = label + completed + ' of ' + total;
+  }
+  // For a phase with no meaningful X-of-Y fraction (e.g. "Reading PDF…") — keeps a stale bar
+  // from a previous fractional phase from lingering on screen once the flow has moved past it.
+  function hideBatchProgress(idPrefix) {
+    var wrap = document.getElementById(idPrefix + 'Progress');
+    if (wrap) wrap.style.display = 'none';
   }
 
   // ---------------- Plan-a-trip modal ----------------
@@ -3211,6 +3301,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
             '<div><span class="field-label">Start date</span><input class="trek-input" id="ptStart" type="date" value="' + todayPlusDays(30) + '" /></div>' +
             '<div><span class="field-label">End date</span><input class="trek-input" id="ptEnd" type="date" value="' + todayPlusDays(30 + (guide.days ? guide.days - 1 : 6)) + '" /></div>' +
           '</div>' +
+          batchProgressHtml('pt') +
           '<div class="btn-row" style="margin-top:16px;justify-content:flex-end;gap:8px">' +
             '<button class="trek-btn trek-btn--secondary" id="ptCancel" type="button">Cancel</button>' +
             '<button class="trek-btn trek-btn--primary" id="ptSubmit" type="button">' + ICONS.compass + ' Create trip</button>' +
@@ -3226,17 +3317,32 @@ svg.leaflet-image-layer.leaflet-interactive path {
       if (!startDate || !endDate) { trek.notify('warning', 'Pick a start and end date'); return; }
       if (endDate < startDate) { trek.notify('warning', 'End date must be on or after the start date'); return; }
       var btn = document.getElementById('ptSubmit');
-      btn.textContent = 'Creating…'; btn.disabled = true;
-      api('/guide/plan-trip', { method: 'POST', body: { guideId: guide.id, title: title, startDate: startDate, endDate: endDate } })
-        .then(function (d) {
+      var cancelBtn = document.getElementById('ptCancel');
+      btn.textContent = 'Creating…'; btn.disabled = true; cancelBtn.disabled = true;
+
+      var totals = { scheduled: 0, unscheduled: 0, failed: 0 };
+      var tripId = null, tripTitle = null;
+      function runBatch(offset) {
+        return api('/guide/plan-trip', {
+          method: 'POST',
+          body: { guideId: guide.id, title: title, startDate: startDate, endDate: endDate, tripId: tripId, offset: offset },
+        }).then(function (d) {
+          tripId = d.trip.id; tripTitle = d.trip.title;
+          totals.scheduled += d.scheduled; totals.unscheduled += d.unscheduled; totals.failed += d.failed;
+          showBatchProgress('pt', 'Adding places… ', d.completed, d.total);
+          if (!d.done) return runBatch(d.completed);
+        });
+      }
+      runBatch(0)
+        .then(function () {
           var parts = [];
-          if (d.scheduled) parts.push(d.scheduled + ' scheduled onto their day');
-          if (d.unscheduled) parts.push(d.unscheduled + ' left in the trip\'s place pool');
-          if (d.failed) parts.push(d.failed + ' could not be added');
-          trek.notify('success', 'Created "' + d.trip.title + '"' + (parts.length ? ' — ' + parts.join(', ') : '') + '. Find it in My Trips.');
+          if (totals.scheduled) parts.push(totals.scheduled + ' scheduled onto their day');
+          if (totals.unscheduled) parts.push(totals.unscheduled + ' left in the trip\'s place pool');
+          if (totals.failed) parts.push(totals.failed + ' could not be added');
+          trek.notify('success', 'Created "' + tripTitle + '"' + (parts.length ? ' — ' + parts.join(', ') : '') + '. Find it in My Trips.');
           closeModal();
         })
-        .catch(function () { btn.textContent = 'Create trip'; btn.disabled = false; });
+        .catch(function () { btn.textContent = 'Create trip'; btn.disabled = false; cancelBtn.disabled = false; });
     });
   }
 
@@ -3250,6 +3356,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         '<h3>' + opts.title + '</h3>' +
         '<p class="trek-muted" style="margin:0 0 14px">' + opts.description + '</p>' +
         '<div id="collectionChoiceBody" class="trek-muted">Loading your collections…</div>' +
+        batchProgressHtml('sc') +
         '<div class="btn-row" style="margin-top:16px;justify-content:flex-end;gap:8px">' +
           '<button class="trek-btn trek-btn--secondary" id="scCancel" type="button">Cancel</button>' +
           '<button class="trek-btn trek-btn--primary" id="scSubmit" type="button">' + ICONS.bookmark + ' Save</button>' +
@@ -3293,9 +3400,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
       var newCollectionName = (!collectionId && newNameInput) ? newNameInput.value.trim() || opts.defaultName : null;
       if (!collectionId && !newCollectionName) { trek.notify('warning', 'Pick a collection or name a new one'); return; }
       var btn = document.getElementById('scSubmit');
-      btn.textContent = 'Saving…'; btn.disabled = true;
-      opts.onSubmit(collectionId, collectionId ? null : newCollectionName).catch(function () {
-        btn.textContent = 'Save'; btn.disabled = false;
+      var cancelBtn = document.getElementById('scCancel');
+      btn.textContent = 'Saving…'; btn.disabled = true; cancelBtn.disabled = true;
+      function onProgress(completed, total) { showBatchProgress('sc', 'Saving places… ', completed, total); }
+      opts.onSubmit(collectionId, collectionId ? null : newCollectionName, onProgress).catch(function () {
+        btn.textContent = 'Save'; btn.disabled = false; cancelBtn.disabled = false;
       });
     });
   }
@@ -3306,13 +3415,22 @@ svg.leaflet-image-layer.leaflet-interactive path {
       description: 'Saves all ' + placeCount + (placeCount === 1 ? ' place' : ' places') + ' in this guide into one of your own Collections, ' +
         'ready to browse later — separate from adding places into a trip.',
       defaultName: guide.title,
-      onSubmit: function (collectionId, newCollectionName) {
-        return api('/guide/export-to-collection', {
-          method: 'POST',
-          body: { guideId: guide.id, collectionId: collectionId, newCollectionName: newCollectionName },
-        }).then(function (d) {
-          var parts = [d.saved + ' of ' + d.total + ' place' + (d.total === 1 ? '' : 's') + ' saved'];
-          if (d.failed) parts.push(d.failed + ' failed');
+      onSubmit: function (collectionId, newCollectionName, onProgress) {
+        var totals = { saved: 0, failed: 0 };
+        function runBatch(cid, offset) {
+          return api('/guide/export-to-collection', {
+            method: 'POST',
+            body: { guideId: guide.id, collectionId: cid, newCollectionName: cid ? null : newCollectionName, offset: offset },
+          }).then(function (d) {
+            totals.saved += d.saved; totals.failed += d.failed;
+            if (onProgress) onProgress(d.completed, d.total);
+            if (!d.done) return runBatch(d.collectionId, d.completed);
+            return d.collectionId;
+          });
+        }
+        return runBatch(collectionId, 0).then(function () {
+          var parts = [totals.saved + ' of ' + (totals.saved + totals.failed) + ' place' + (totals.saved + totals.failed === 1 ? '' : 's') + ' saved'];
+          if (totals.failed) parts.push(totals.failed + ' failed');
           trek.notify('success', parts.join(', ') + '. Find it in your Collections.');
           closeModal();
         });
@@ -3456,13 +3574,13 @@ svg.leaflet-image-layer.leaflet-interactive path {
           '</div>'
         : '';
       searchRowEl.innerHTML =
-        '<input class="trek-input search-input" id="searchBox" placeholder="Search guides by title or place…" value="' + esc(state.search) + '" />' +
-        '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px">' +
-          (tagChipsHtml || '<span></span>') +
-          '<select class="trek-select" id="guideSortSelect" style="max-width:170px;margin-left:auto">' +
+        '<div class="guide-search-row">' +
+          '<input class="trek-input search-input" id="searchBox" placeholder="Search guides by title or place…" value="' + esc(state.search) + '" style="flex:1" />' +
+          '<select class="trek-select" id="guideSortSelect" style="width:170px;flex:none">' +
             SORT_OPTIONS.map(function (o) { return '<option value="' + o.key + '"' + (state.sortOrder === o.key ? ' selected' : '') + '>' + o.label + '</option>'; }).join('') +
           '</select>' +
-        '</div>';
+        '</div>' +
+        tagChipsHtml;
       document.getElementById('searchBox').addEventListener('input', function () {
         state.search = this.value;
         renderGuideGrid();
@@ -3528,6 +3646,27 @@ svg.leaflet-image-layer.leaflet-interactive path {
       ? '<div id="guideViewToggle" style="display:flex;gap:8px;margin:16px 0 4px">' +
           '<button class="timeline-pill active" data-view-mode="list" type="button" style="display:inline-flex;align-items:center;gap:6px">' + ICONS.list + ' List</button>' +
           '<button class="timeline-pill" data-view-mode="map" type="button" style="display:inline-flex;align-items:center;gap:6px">' + ICONS.pin + ' Map</button>' +
+        '</div>'
+      : '';
+
+    // Which categories are actually on the map, in a fixed order (matches CATEGORIES) rather
+    // than first-seen order, so the chip row doesn't reshuffle between guides. Reset fresh on
+    // every renderDetail() call, same lifetime as guideMapState itself (see initGuideMap above).
+    var mapCategoriesPresent = CATEGORIES.filter(function (c) {
+      return mapPlaces.some(function (p) { return (p.category || 'Other') === c; });
+    });
+    var activeMapCat = ''; // '' = show every category
+    function currentMapPlaces() {
+      if (!activeMapCat) return mapPlaces;
+      return mapPlaces.filter(function (p) { return (p.category || 'Other') === activeMapCat; });
+    }
+    var mapCategoryFilterHtml = mapCategoriesPresent.length > 1
+      ? '<div id="mapCategoryFilter" class="trek-cluster map-category-filter">' +
+          '<button class="timeline-pill active" data-map-cat="" type="button">All</button>' +
+          mapCategoriesPresent.map(function (c) {
+            return '<button class="timeline-pill" data-map-cat="' + esc(c) + '" type="button">' +
+              '<span class="cat-dot" style="background:' + (CATEGORY_COLORS[c] || CATEGORY_COLORS['Other']) + '"></span> ' + esc(c) + '</button>';
+          }).join('') +
         '</div>'
       : '';
 
@@ -3608,7 +3747,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       '<div id="guideContentSplit" class="guide-content-split">' +
         '<div id="guideListView" class="guide-list-pane">' + timelineNav + bodyHtml + '</div>' +
         (mapPlaces.length
-          ? '<div id="guideMapView" class="guide-map-pane"><div class="guide-map-wrap"><div class="guide-map" id="guideMap"></div></div></div>'
+          ? '<div id="guideMapView" class="guide-map-pane">' + mapCategoryFilterHtml + '<div class="guide-map-wrap"><div class="guide-map" id="guideMap"></div></div></div>'
           : '') +
       '</div>' +
       relatedHtml;
@@ -3625,6 +3764,32 @@ svg.leaflet-image-layer.leaflet-interactive path {
     var viewToggleEl = document.getElementById('guideViewToggle');
     if (viewToggleEl) {
       var guideSplitEl = document.getElementById('guideContentSplit');
+      function onMapMarkerClick(placeId) {
+        // On the mobile (List-replaces-Map) layout the list pane is hidden while the map
+        // is showing, so it has to be switched back to first or the target never had a
+        // chance to become visible. On the desktop split screen both panes are already
+        // visible side by side — switching away would defeat the point of the split.
+        var isDesktopSplit = window.matchMedia('(min-width: 640px)').matches;
+        if (!isDesktopSplit) { viewToggleEl.querySelector('button[data-view-mode="list"]').click(); }
+        var target = document.getElementById('place-' + placeId);
+        if (!target) return;
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('place-card--flash');
+        setTimeout(function () { target.classList.remove('place-card--flash'); }, 1100);
+      }
+      var mapCatFilterEl = document.getElementById('mapCategoryFilter');
+      if (mapCatFilterEl) {
+        mapCatFilterEl.querySelectorAll('button[data-map-cat]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            activeMapCat = btn.getAttribute('data-map-cat') || '';
+            mapCatFilterEl.querySelectorAll('button').forEach(function (b) { b.classList.toggle('active', b === btn); });
+            // Only the map needs to react — the category filter only ever shows once there's a
+            // map to show it next to, so a rebuild here always means the map pane is visible.
+            destroyGuideMap();
+            initGuideMap(document.getElementById('guideMap'), currentMapPlaces(), onMapMarkerClick);
+          });
+        });
+      }
       viewToggleEl.querySelectorAll('button[data-view-mode]').forEach(function (btn) {
         btn.addEventListener('click', function () {
           var mode = btn.getAttribute('data-view-mode');
@@ -3634,19 +3799,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
           // screen at >=640px — this class toggle is the only thing JS controls either way.
           guideSplitEl.classList.toggle('map-active', mode === 'map');
           if (mode === 'map') {
-            initGuideMap(document.getElementById('guideMap'), mapPlaces, function (placeId) {
-              // On the mobile (List-replaces-Map) layout the list pane is hidden while the map
-              // is showing, so it has to be switched back to first or the target never had a
-              // chance to become visible. On the desktop split screen both panes are already
-              // visible side by side — switching away would defeat the point of the split.
-              var isDesktopSplit = window.matchMedia('(min-width: 640px)').matches;
-              if (!isDesktopSplit) { viewToggleEl.querySelector('button[data-view-mode="list"]').click(); }
-              var target = document.getElementById('place-' + placeId);
-              if (!target) return;
-              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              target.classList.add('place-card--flash');
-              setTimeout(function () { target.classList.remove('place-card--flash'); }, 1100);
-            });
+            initGuideMap(document.getElementById('guideMap'), currentMapPlaces(), onMapMarkerClick);
           }
         });
       });
@@ -3675,6 +3828,13 @@ svg.leaflet-image-layer.leaflet-interactive path {
         var block = state.blocks.find(function (b) { return b.id === Number(btn.getAttribute('data-save-block')); });
         if (block) openSavePlaceToCollectionModal(block);
       });
+    });
+    // Only meaningful once the map exists — highlightMapMarker no-ops gracefully via a missing
+    // markersByPlaceId entry if "Map" was never clicked (or on this guide's place-less days).
+    contentEl.querySelectorAll('.place-card').forEach(function (card) {
+      var placeId = Number(card.id.replace('place-', ''));
+      card.addEventListener('mouseenter', function () { highlightMapMarker(placeId, true); });
+      card.addEventListener('mouseleave', function () { highlightMapMarker(placeId, false); });
     });
     contentEl.querySelectorAll('[data-open-link]').forEach(function (el) {
       el.addEventListener('click', function () { trek.openExternal(el.getAttribute('data-open-link')); });
@@ -3917,11 +4077,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
               '<span class="status-chip status-chip--' + g.status + '">' + g.status + '</span>' +
             '</div>' +
             '<div class="admin-guide-actions">' +
-              '<button class="icon-btn' + (g.featured ? ' icon-btn--featured' : '') + '" data-feature="' + g.id + '" type="button" title="' + (g.featured ? 'Unfeature' : 'Feature — pin to the top of the list') + '">' + ICONS.star + '</button>' +
-              '<button class="icon-btn" data-open="' + g.id + '" type="button" title="Edit guide">' + ICONS.edit + '</button>' +
-              '<button class="icon-btn" data-dup="' + g.id + '" type="button" title="Duplicate guide">' + ICONS.copy + '</button>' +
-              '<button class="icon-btn" data-export="' + g.id + '" type="button" title="Export as JSON (for the marketplace)">' + ICONS.download + '</button>' +
-              '<button class="icon-btn icon-btn--danger" data-del="' + g.id + '" type="button" title="Delete guide">' + ICONS.trash + '</button>' +
+              '<button class="icon-btn' + (g.featured ? ' icon-btn--featured' : '') + '" data-feature="' + g.id + '" type="button" title="' + (g.featured ? 'Unfeature' : 'Feature — pin to the top of the list') + '" aria-label="' + (g.featured ? 'Unfeature' : 'Feature') + ' “' + esc(g.title) + '”">' + ICONS.star + '</button>' +
+              '<button class="icon-btn" data-open="' + g.id + '" type="button" title="Edit guide" aria-label="Edit “' + esc(g.title) + '”">' + ICONS.edit + '</button>' +
+              '<button class="icon-btn" data-dup="' + g.id + '" type="button" title="Duplicate guide" aria-label="Duplicate “' + esc(g.title) + '”">' + ICONS.copy + '</button>' +
+              '<button class="icon-btn" data-export="' + g.id + '" type="button" title="Export as JSON (for the marketplace)" aria-label="Export “' + esc(g.title) + '” as JSON">' + ICONS.download + '</button>' +
+              '<button class="icon-btn icon-btn--danger" data-del="' + g.id + '" type="button" title="Delete guide" aria-label="Delete “' + esc(g.title) + '”">' + ICONS.trash + '</button>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -4208,8 +4368,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
           '<span class="drag-handle">' + ICONS.grip + '</span>' +
           '<div class="block-preview"><div class="block-type-label">' + b.type + '</div>' + adminBlockPreviewHtml(b) + '</div>' +
           '<div class="block-actions">' +
-            '<button class="icon-btn" data-edit-block="' + b.id + '" type="button" title="Edit">' + ICONS.edit + '</button>' +
-            '<button class="icon-btn icon-btn--danger" data-del-block="' + b.id + '" type="button" title="Delete">' + ICONS.trash + '</button>' +
+            '<button class="icon-btn" data-edit-block="' + b.id + '" type="button" title="Edit" aria-label="Edit ' + esc(b.type) + ' block">' + ICONS.edit + '</button>' +
+            '<button class="icon-btn icon-btn--danger" data-del-block="' + b.id + '" type="button" title="Delete" aria-label="Delete ' + esc(b.type) + ' block">' + ICONS.trash + '</button>' +
           '</div>' +
         '</div>';
       }).join('');

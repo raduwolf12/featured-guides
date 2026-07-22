@@ -15,6 +15,16 @@ function sleep(ms) {
 // they can't be batched that way) — keeps steady-state throughput under the 20/s refill rate.
 const RATE_LIMIT_GAP_MS = 60;
 
+// /guide/plan-trip and /guide/export-to-collection process a big per-item ctx.* loop in ONE
+// request, so with no chunking a large guide could sit paced at RATE_LIMIT_GAP_MS (or slower,
+// under real rate-limit backoff) for several seconds with nothing but a static "Creating…"/
+// "Saving…" label — no way to tell it's working versus stuck. Both routes instead process one
+// batch of this many items per call and report back {completed, total, done}; the client loops
+// calling the same route (carrying back the tripId/collectionId it got from call 1) until
+// done, updating a real progress bar between calls. 8 items × up to 3 ctx.* calls each stays
+// comfortably under the token bucket's burst-60 allowance per batch.
+const BULK_CTX_BATCH_SIZE = 8;
+
 function json(status, body) {
   return { status, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
@@ -682,6 +692,49 @@ function dayAssignedPlaceIds(day) {
   return [];
 }
 
+// Defensively formats a ctx.trips.getReservations()/getAccommodations() entry into one
+// descriptive line for /guide/import-trip's "Travel & Stays" section — exact field names aren't
+// documented beyond "typed entity" + "endpoints (from/to/stop legs)" for a reservation, so probe
+// plausible key variants, same defensive-read approach as tripPlaceRow above. Worst case a guess
+// misses and the line just reads a bit more generically — never a crash, and never silently
+// dropped the way these used to be before this existed.
+function tripReservationText(r) {
+  if (!r || typeof r !== 'object') return null;
+  const kind = r.type || r.kind || r.category || 'Reservation';
+  const title = r.title || r.name || r.label || null;
+  const carrier = r.carrier || r.airline || r.operator || r.provider || null;
+  const number = r.number || r.flight_number || r.reference || r.confirmation_number || r.booking_ref || null;
+  const legs = Array.isArray(r.endpoints) ? r.endpoints : (Array.isArray(r.legs) ? r.legs : []);
+  const first = legs[0] || {};
+  const last = legs[legs.length - 1] || first;
+  const from = first.from || first.from_location || first.origin || first.departure_location || null;
+  const to = last.to || last.to_location || last.destination || last.arrival_location || null;
+  const when = first.depart_at || first.departure_time || first.date || first.time || r.date || r.start_date || null;
+
+  const labelParts = [String(kind)];
+  if (carrier) labelParts.push(String(carrier));
+  if (number) labelParts.push('#' + number);
+  let line = title ? String(title) : labelParts.join(' ');
+  const details = [];
+  if (from && to) details.push(`${from} → ${to}`);
+  if (when) details.push(String(when).replace('T', ' ').slice(0, 16));
+  if (details.length) line += ': ' + details.join(', ');
+  return { text: line.slice(0, 300), sortDate: when ? String(when) : '' };
+}
+function tripAccommodationText(a) {
+  if (!a || typeof a !== 'object') return null;
+  const name = a.name || a.title || a.label || 'Accommodation';
+  const checkin = a.checkin || a.check_in || a.checkInDate || a.start_date || a.from || null;
+  const checkout = a.checkout || a.check_out || a.checkOutDate || a.end_date || a.to || null;
+  const address = a.address || null;
+  const details = [];
+  if (checkin && checkout) details.push(`${String(checkin).slice(0, 10)} → ${String(checkout).slice(0, 10)}`);
+  if (address) details.push(String(address));
+  let line = 'Hotel — ' + String(name);
+  if (details.length) line += ': ' + details.join(', ');
+  return { text: line.slice(0, 300), sortDate: checkin ? String(checkin) : '' };
+}
+
 const TEMPLATES = ['blank', 'list', 'itinerary'];
 const BLOCK_TYPES = ['day', 'heading', 'body', 'quote', 'divider', 'image', 'link', 'guide', 'activity', 'place'];
 const HEADING_LEVELS = ['normal', 'medium', 'large'];
@@ -1109,6 +1162,24 @@ module.exports = definePlugin({
     }
 
     ctx.log.info('featured-guides loaded');
+  },
+
+  // Manifest `actions[]` button on the plugin's own settings page — user-bound (reads the
+  // CLICKING user's own saved key, exactly like every route above that calls otmFetch), so an
+  // admin finds out their key is bad the moment they paste it in rather than on their first
+  // real search inside a guide.
+  actions: {
+    async test_connection(ctx) {
+      const apiKey = await ctx.settings.get('opentripmap_api_key');
+      if (!apiKey) return { ok: false, message: 'No API key saved yet — paste one above, then test it.' };
+      try {
+        const geo = await otmFetch(apiKey, '/geoname?name=Paris');
+        if (geo && typeof geo.lat === 'number') return { ok: true, message: 'Looks good — OpenTripMap accepted this key.' };
+        return { ok: false, message: 'OpenTripMap responded, but not with what was expected — double-check the key.' };
+      } catch (e) {
+        return { ok: false, message: String((e && e.message) || e).slice(0, 200) };
+      }
+    },
   },
 
   routes: [
@@ -1690,6 +1761,9 @@ module.exports = definePlugin({
       // Collection, new or existing: the reverse direction of "from a collection" below.
       // ctx.collections isn't the plugin's own db, so its calls can't be batched via ctx.db.tx —
       // same per-call pacing as /guide/plan-trip, against the same host RPC rate limit.
+      // Resumable, one batch per call — see BULK_CTX_BATCH_SIZE above. Call 1 (no collectionId)
+      // creates the collection and processes the first batch; the client repeats the call
+      // (now carrying the returned collectionId + offset: completed) until done: true.
       method: 'POST', path: '/guide/export-to-collection', auth: true,
       async handler(req, ctx) {
         const b = req.body || {};
@@ -1698,6 +1772,7 @@ module.exports = definePlugin({
         if (!ctx.collections) return error(400, "This TREK instance doesn't support Collections yet — try updating TREK.");
         const collectionIdInput = Number.isInteger(Number(b.collectionId)) && b.collectionId != null ? Number(b.collectionId) : null;
         const newCollectionName = b.newCollectionName ? String(b.newCollectionName).trim().slice(0, 200) : '';
+        const offset = Number.isInteger(Number(b.offset)) && Number(b.offset) > 0 ? Number(b.offset) : 0;
         if (!collectionIdInput && !newCollectionName) return error(400, 'Pick an existing collection or name a new one');
 
         const guideRows = await ctx.db.query('SELECT * FROM guides WHERE id = ?', guideId);
@@ -1706,24 +1781,26 @@ module.exports = definePlugin({
         if (guideRows[0].status !== 'published' && !isAdmin) return error(404, 'Guide not found');
 
         let collectionId = collectionIdInput;
-        try {
-          if (!collectionId) {
+        if (!collectionId) {
+          try {
             const created = await ctx.collections.create({ name: newCollectionName, title: newCollectionName });
             collectionId = created && created.id;
             if (!collectionId) throw new Error("Could not read back the new collection's id");
+          } catch (e) {
+            const message = String(e && e.message || e);
+            if (message.startsWith('RESOURCE_FORBIDDEN')) return error(400, 'The Collections addon is not enabled on this TREK instance.');
+            if (message.startsWith('PERMISSION_DENIED')) return error(400, 'This plugin needs the "db:write:collections" permission re-approved — reinstall or update the plugin in Admin → Plugins to grant it.');
+            return error(502, 'Could not create that collection: ' + message);
           }
-        } catch (e) {
-          const message = String(e && e.message || e);
-          if (message.startsWith('RESOURCE_FORBIDDEN')) return error(400, 'The Collections addon is not enabled on this TREK instance.');
-          if (message.startsWith('PERMISSION_DENIED')) return error(400, 'This plugin needs the "db:write:collections" permission re-approved — reinstall or update the plugin in Admin → Plugins to grant it.');
-          return error(502, 'Could not create that collection: ' + message);
         }
 
         const blocks = (await ctx.db.query('SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', guideId)).map(blockRow);
         const places = blocks.filter((bl) => bl.type === 'place').map((bl) => bl.data);
+        const total = places.length;
+        const batch = places.slice(offset, offset + BULK_CTX_BATCH_SIZE);
 
         let saved = 0, failed = 0;
-        for (const p of places) {
+        for (const p of batch) {
           try {
             await ctx.collections.savePlace(collectionPlaceInput(collectionId, p));
             saved++;
@@ -1734,7 +1811,8 @@ module.exports = definePlugin({
           await sleep(RATE_LIMIT_GAP_MS);
         }
 
-        return json(201, { collectionId, saved, failed, total: places.length });
+        const completed = Math.min(offset + batch.length, total);
+        return json(201, { collectionId, saved, failed, completed, total, done: completed >= total });
       },
     },
     {
@@ -1855,6 +1933,11 @@ module.exports = definePlugin({
       },
     },
     {
+      // Resumable, one batch per call — see BULK_CTX_BATCH_SIZE above. Call 1 (no tripId) creates
+      // the trip and processes the first batch of places; the client repeats the call (now
+      // carrying the returned trip.id + offset: completed) until done: true. The place/day
+      // assignment plan itself isn't persisted anywhere — it's cheap to re-derive from the
+      // guide's own blocks on every call, so each request only needs to carry tripId + offset.
       method: 'POST', path: '/guide/plan-trip', auth: true,
       async handler(req, ctx) {
         const b = req.body || {};
@@ -1870,35 +1953,49 @@ module.exports = definePlugin({
         const isAdmin = !!(req.user && req.user.isAdmin);
         if (guideRows[0].status !== 'published' && !isAdmin) return error(404, 'Guide not found');
 
-        const title = (b.title && String(b.title).trim()) || guideRows[0].title;
+        const offset = Number.isInteger(Number(b.offset)) && Number(b.offset) > 0 ? Number(b.offset) : 0;
+        let tripId = Number.isInteger(Number(b.tripId)) ? Number(b.tripId) : null;
+        let tripTitle = (b.title && String(b.title).trim()) || guideRows[0].title;
 
-        let trip;
-        try {
-          trip = await ctx.trips.create({ title: title.slice(0, 200), start_date: b.startDate, end_date: b.endDate });
-        } catch (e) {
-          const message = String(e && e.message || e);
-          if (message.startsWith('RESOURCE_FORBIDDEN')) return error(403, "You don't have permission to create a new trip.");
-          if (message.startsWith('PERMISSION_DENIED')) return error(403, 'Permission denied.');
-          if (message.startsWith('BAD_PARAMS')) return error(400, 'Could not create a trip with that title or date range.');
-          return error(502, 'Could not create the trip.');
+        if (!tripId) {
+          try {
+            const created = await ctx.trips.create({ title: tripTitle.slice(0, 200), start_date: b.startDate, end_date: b.endDate });
+            tripId = created.id;
+            tripTitle = created.title;
+          } catch (e) {
+            const message = String(e && e.message || e);
+            if (message.startsWith('RESOURCE_FORBIDDEN')) return error(403, "You don't have permission to create a new trip.");
+            if (message.startsWith('PERMISSION_DENIED')) return error(403, 'Permission denied.');
+            if (message.startsWith('BAD_PARAMS')) return error(400, 'Could not create a trip with that title or date range.');
+            return error(502, 'Could not create the trip.');
+          }
         }
 
         const blocks = (await ctx.db.query('SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', guideId)).map(blockRow);
+        const placeItems = [];
+        let currentDayNumber = null;
+        for (const block of blocks) {
+          if (block.type === 'day') { currentDayNumber = block.data.dayNumber; continue; }
+          if (block.type !== 'place' && block.type !== 'activity') continue;
+          placeItems.push({ data: block.data, dayNumber: currentDayNumber });
+        }
+        const total = placeItems.length;
+        const batch = placeItems.slice(offset, offset + BULK_CTX_BATCH_SIZE);
 
         // Map calendar date -> day id, seeding it lazily only for days we actually need
-        // (the trip may already have day rows from its own creation, or may not). Wrapped like
-        // every other host call in this loop below — the trip already exists at this point, so a
-        // transient failure here should degrade to "nothing pre-seeded, create days as needed"
-        // rather than aborting the request and leaving that trip orphaned with zero places.
+        // (the trip may already have day rows from its own creation, or from an earlier batch on
+        // this same trip). Wrapped like every other host call in this loop below — the trip
+        // already exists at this point, so a transient failure here should degrade to "nothing
+        // pre-seeded, create days as needed" rather than aborting the request.
         const dayIdByDate = {};
         try {
-          for (const d of await ctx.trips.getDays(trip.id)) { if (d.date) dayIdByDate[d.date] = d.id; }
+          for (const d of await ctx.trips.getDays(tripId)) { if (d.date) dayIdByDate[d.date] = d.id; }
         } catch (e) {
           ctx.log.error('plan-trip: getDays failed (continuing with none pre-seeded)', { message: e && e.message });
         }
         async function dayIdFor(dateStr) {
           if (dayIdByDate[dateStr]) return dayIdByDate[dateStr];
-          const created = await ctx.days.create(trip.id, { date: dateStr });
+          const created = await ctx.days.create(tripId, { date: dateStr });
           dayIdByDate[dateStr] = created.id;
           await sleep(RATE_LIMIT_GAP_MS);
           return created.id;
@@ -1909,14 +2006,11 @@ module.exports = definePlugin({
         // plugin's own db:own tables), so they can't be collapsed into a ctx.db.tx() batch. A
         // large guide's places would otherwise fire that many calls back-to-back and trip the
         // same per-plugin RPC rate limit; pace every ctx.* call with a fixed gap instead.
-        let currentDayNumber = null;
         let scheduled = 0, unscheduled = 0, failed = 0;
-        for (const block of blocks) {
-          if (block.type === 'day') { currentDayNumber = block.data.dayNumber; continue; }
-          if (block.type !== 'place' && block.type !== 'activity') continue;
+        for (const item of batch) {
           let placeId;
           try {
-            const created = await ctx.places.create(trip.id, placeCreateInput(block.data));
+            const created = await ctx.places.create(tripId, placeCreateInput(item.data));
             placeId = created.id;
           } catch (e) {
             ctx.log.error('plan-trip: place create failed', { message: e && e.message });
@@ -1924,11 +2018,11 @@ module.exports = definePlugin({
             continue;
           }
           await sleep(RATE_LIMIT_GAP_MS);
-          const targetDate = currentDayNumber != null ? addDaysISO(b.startDate, currentDayNumber - 1) : null;
+          const targetDate = item.dayNumber != null ? addDaysISO(b.startDate, item.dayNumber - 1) : null;
           if (targetDate && targetDate <= b.endDate && placeId != null) {
             try {
               const dayId = await dayIdFor(targetDate);
-              await ctx.itinerary.assign(trip.id, dayId, placeId);
+              await ctx.itinerary.assign(tripId, dayId, placeId);
               scheduled++;
               await sleep(RATE_LIMIT_GAP_MS);
               continue;
@@ -1940,9 +2034,11 @@ module.exports = definePlugin({
           unscheduled++;
         }
 
+        const completed = Math.min(offset + batch.length, total);
         return json(201, {
-          trip: { id: trip.id, title: trip.title, startDate: b.startDate, endDate: b.endDate },
+          trip: { id: tripId, title: tripTitle, startDate: b.startDate, endDate: b.endDate },
           scheduled, unscheduled, failed,
+          completed, total, done: completed >= total,
         });
       },
     },
@@ -2078,6 +2174,15 @@ module.exports = definePlugin({
         } catch {
           rawDays = []; // non-fatal — the guide just comes in as a flat, unscheduled list instead
         }
+        // Flights and hotel bookings used to be silently excluded entirely — brought in now as a
+        // short "Travel & Stays" text section instead (never scheduled onto a day like a real
+        // place; this plugin has no place model for them, same reasoning the TREK-native PDF
+        // parser above already documents). Both non-fatal: an older host without these two
+        // methods yet, or a trip with none, just means an empty section that's skipped below.
+        let rawReservations = [];
+        try { rawReservations = toArray(await ctx.trips.getReservations(tripId)); } catch {}
+        let rawAccommodations = [];
+        try { rawAccommodations = toArray(await ctx.trips.getAccommodations(tripId)); } catch {}
 
         const places = rawPlaces.map(tripPlaceRow).filter((p) => p.name);
         rawDays.sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
@@ -2115,6 +2220,21 @@ module.exports = definePlugin({
         const title = (trip.title && String(trip.title).trim().slice(0, 200)) || 'Imported trip';
         const location = trip.location ? String(trip.location).trim().slice(0, 200) : null;
 
+        const bookingItems = [
+          ...rawReservations.map(tripReservationText),
+          ...rawAccommodations.map(tripAccommodationText),
+        ].filter(Boolean);
+        bookingItems.sort((a, b) => a.sortDate.localeCompare(b.sortDate));
+        const bookingBlocks = [];
+        if (bookingItems.length) {
+          const headingData = validateBlockData('heading', { text: 'Travel & Stays', level: 'medium' });
+          bookingBlocks.push({ type: 'heading', data: headingData });
+          for (const item of bookingItems) {
+            const bodyData = validateBlockData('body', { text: item.text });
+            if (typeof bodyData !== 'string') bookingBlocks.push({ type: 'body', data: bodyData });
+          }
+        }
+
         await ctx.db.exec(
           'INSERT INTO guides (title, location, description, template) VALUES (?, ?, ?, ?)',
           title, location, null, hasDays ? 'itinerary' : 'list'
@@ -2122,12 +2242,18 @@ module.exports = definePlugin({
         const guideRows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
         const guide = guideRows[0];
 
-        const result = await insertPdfPlaceBlocks(ctx, guide.id, sanitized, 0, null);
+        let pos = 0;
+        if (bookingBlocks.length) {
+          await insertMarketplaceBlocks(ctx, guide.id, 0, bookingBlocks);
+          pos = bookingBlocks.length;
+        }
+        const result = await insertPdfPlaceBlocks(ctx, guide.id, sanitized, pos, null);
 
         return json(201, {
           guide: guideRow(guide),
           placeCount: result.placesInserted,
           dayCount: result.dayBlocksInserted,
+          bookingCount: bookingItems.length,
           totalTripPlaces: places.length,
         });
       },
