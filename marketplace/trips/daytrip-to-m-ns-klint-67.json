@@ -1,0 +1,52 @@
+{
+  "guide": {
+    "title": "Daytrip to Møns Klint",
+    "location": null,
+    "description": null,
+    "template": "itinerary"
+  },
+  "blocks": [
+    {
+      "type": "heading",
+      "data": {
+        "text": "Travel & Stays",
+        "level": "medium"
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "Møns Cliffs and Aborrebjerg → Copenhagen Central Station"
+      }
+    },
+    {
+      "type": "body",
+      "data": {
+        "text": "Copenhagen Central Station → Møns Cliffs and Aborrebjerg"
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 1,
+        "title": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Møns Cliffs and Aborrebjerg",
+        "category": null,
+        "description": null,
+        "address": null,
+        "lat": 54.98245,
+        "lon": 12.52591,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    }
+  ]
+}
