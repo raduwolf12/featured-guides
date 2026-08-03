@@ -2471,16 +2471,6 @@ module.exports = definePlugin({
             () => JSON.stringify(guidePayload, null, 2)
           );
 
-          await putOnBranch(
-            `marketplace/trips/index.json`,
-            `List community trip: ${title}`,
-            (currentText) => {
-              const current = currentText ? JSON.parse(currentText) : [];
-              const withoutThisSlug = current.filter((e) => e.id !== slug);
-              return JSON.stringify([...withoutThisSlug, indexEntry], null, 2);
-            }
-          );
-
           // A PR from this branch can already be open from a prior attempt that failed after
           // this point — reuse it instead of erroring on GitHub's "already exists" 422.
           try {
@@ -2530,6 +2520,20 @@ module.exports = definePlugin({
           discussionNumber = discussion.number;
           discussionUrl = discussion.url;
           discussionNodeId = discussion.id;
+
+          // Committed after the discussion exists (and after the PR is open — a later commit on
+          // the same branch just shows up in the PR's diff automatically, no extra step needed)
+          // so the Community Trips list entry can carry a working discussionUrl from the start,
+          // instead of every browsing user needing to open the PR first to find it.
+          await putOnBranch(
+            `marketplace/trips/index.json`,
+            `List community trip: ${title}`,
+            (currentText) => {
+              const current = currentText ? JSON.parse(currentText) : [];
+              const withoutThisSlug = current.filter((e) => e.id !== slug);
+              return JSON.stringify([...withoutThisSlug, { ...indexEntry, discussionUrl }], null, 2);
+            }
+          );
         } catch (e) {
           return error(502, 'GitHub request failed: ' + String(e && e.message || e));
         }
@@ -2540,6 +2544,99 @@ module.exports = definePlugin({
         );
 
         return json(201, { prUrl, discussionUrl });
+      },
+    },
+    {
+      // Lets the public Guides page show the Community Trips entry point to any user who's
+      // bothered to set up a GitHub PAT, not just admins — browsing/viewing a Discussion needs
+      // no admin rights at all, only Import/Share/posting a suggestion do (still gated by
+      // requireAdmin on those routes). Deliberately just a boolean: never echoes the token itself
+      // back to the client, admin or not.
+      method: 'GET', path: '/me/github-pat-status', auth: true,
+      async handler(req, ctx) {
+        const token = await ctx.settings.get('github_pat');
+        return json(200, { hasToken: !!token });
+      },
+    },
+    {
+      // Read side of suggestions for a trip browsed from the Community Trips marketplace list —
+      // NOT the same as /trip/suggestions below, which keys off this instance's own trip_shares
+      // row and only makes sense on the instance that did the sharing. An admin browsing someone
+      // ELSE's shared trip has no local trip_shares row for it at all, only the discussionUrl
+      // carried in the marketplace index.json entry — so this keys off that URL directly instead.
+      method: 'GET', path: '/marketplace/trip-comments', auth: true,
+      async handler(req, ctx) {
+        const discussionUrl = String(req.query.discussionUrl || '');
+        const match = discussionUrl.match(/\/discussions\/(\d+)/);
+        if (!match) return error(400, 'A valid discussionUrl is required');
+        const discussionNumber = Number(match[1]);
+
+        const token = await ctx.settings.get('github_pat');
+        if (!token) return json(200, { comments: [], needsToken: true });
+
+        try {
+          const data = await githubGraphQL(
+            token,
+            `query($owner:String!,$name:String!,$number:Int!){
+              repository(owner:$owner,name:$name){
+                discussion(number:$number){ comments(first:50){ nodes{ id url body createdAt author{ login } } } }
+              }
+            }`,
+            { owner: GITHUB_OWNER, name: GITHUB_REPO, number: discussionNumber }
+          );
+          const nodes = (data.repository.discussion && data.repository.discussion.comments.nodes) || [];
+          return json(200, {
+            comments: nodes.map((c) => ({ id: c.id, author: c.author && c.author.login, body: c.body, createdAt: c.createdAt, url: c.url })),
+          });
+        } catch (e) {
+          return error(502, 'Could not load suggestions: ' + String(e && e.message || e));
+        }
+      },
+    },
+    {
+      // Write side — same reasoning as above, keyed by discussionUrl rather than a local
+      // trip_shares row. Stays admin-only, same as every other marketplace write action; posting
+      // uses the poster's own PAT so GitHub attributes the comment to them, not this plugin.
+      method: 'POST', path: '/marketplace/trip-comments', auth: true,
+      async handler(req, ctx) {
+        const denied = requireAdmin(req); if (denied) return denied;
+        const b = req.body || {};
+        const discussionUrl = String(b.discussionUrl || '');
+        const match = discussionUrl.match(/\/discussions\/(\d+)/);
+        if (!match) return error(400, 'A valid discussionUrl is required');
+        const discussionNumber = Number(match[1]);
+        const body = String(b.body || '').trim().slice(0, 2000);
+        if (!body) return error(400, 'Suggestion text is required');
+
+        const token = await ctx.settings.get('github_pat');
+        if (!token) return error(400, "Set your GitHub personal access token in this plugin's settings first.");
+
+        try {
+          const discussionData = await githubGraphQL(
+            token,
+            `query($owner:String!,$name:String!,$number:Int!){ repository(owner:$owner,name:$name){ discussion(number:$number){ id } } }`,
+            { owner: GITHUB_OWNER, name: GITHUB_REPO, number: discussionNumber }
+          );
+          const discussionId = discussionData.repository.discussion && discussionData.repository.discussion.id;
+          if (!discussionId) return error(404, 'Discussion not found');
+
+          const data = await githubGraphQL(
+            token,
+            `mutation($discussionId:ID!,$body:String!){
+              addDiscussionComment(input:{discussionId:$discussionId,body:$body}) {
+                comment { id url body createdAt author{ login } }
+              }
+            }`,
+            { discussionId, body }
+          );
+          const comment = data.addDiscussionComment.comment;
+          return json(201, {
+            id: comment.id, author: comment.author && comment.author.login, body: comment.body,
+            createdAt: comment.createdAt, url: comment.url,
+          });
+        } catch (e) {
+          return error(502, 'Could not post suggestion: ' + String(e && e.message || e));
+        }
       },
     },
     {
