@@ -2,6 +2,10 @@
 const { definePlugin } = require('trek-plugin-sdk');
 
 const OTM_BASE = 'https://api.opentripmap.com/0.1/en/places';
+const GITHUB_API_BASE = 'https://api.github.com';
+const GITHUB_OWNER = 'raduwolf12';
+const GITHUB_REPO = 'featured-guides';
+const GITHUB_FETCH_TIMEOUT_MS = 8000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -73,6 +77,60 @@ async function otmFetch(apiKey, path) {
   const res = await fetch(`${OTM_BASE}${path}${sep}apikey=${encodeURIComponent(apiKey)}`);
   if (!res.ok) throw new Error(`OpenTripMap request failed (${res.status})`);
   return res.json();
+}
+
+// GitHub's REST API has no create/list/comment endpoints for repository Discussions (only
+// organization-level "team discussions", a different feature) — that surface is GraphQL-only.
+// Everything Discussion-shaped (category lookup, create, list comments, add comment) goes
+// through this instead of githubFetch below.
+async function githubGraphQL(token, query, variables) {
+  if (!token) throw new Error("Set your GitHub personal access token in this plugin's settings first.");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GITHUB_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${GITHUB_API_BASE}/graphql`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, variables }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.errors) {
+      throw new Error((data.errors && data.errors.map((e) => e.message).join('; ')) || `GitHub GraphQL request failed (${res.status})`);
+    }
+    return data.data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Same shape as otmFetch above — takes an already-resolved token rather than fetching it itself,
+// same rate-limit reasoning. Used for both the write side (opening a Share Trip PR/Discussion)
+// and the read side (listing/posting suggestions), always with the CLICKING user's own PAT so
+// GitHub attributes every commit/comment to them, never to this plugin.
+async function githubFetch(token, path, opts) {
+  if (!token) throw new Error("Set your GitHub personal access token in this plugin's settings first.");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GITHUB_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${GITHUB_API_BASE}${path}`, {
+      ...opts,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(opts && opts.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(opts && opts.headers),
+      },
+    });
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : null;
+    if (!res.ok) throw new Error((data && data.message) || `GitHub request failed (${res.status})`);
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Auto-fetched OpenTripMap/Wikimedia thumbnails are pulled server-side (fetch() inside the
@@ -735,6 +793,133 @@ function tripAccommodationText(a) {
   return { text: line.slice(0, 300), sortDate: checkin ? String(checkin) : '' };
 }
 
+// In-memory twin of insertPdfPlaceBlocks (server/index.js) — same day-grouping loop, but returns
+// the {type, data} list instead of writing guide_blocks rows. Used by /trip/share, which needs
+// the block JSON to put in a GitHub file, not in this plugin's own db:own storage.
+function placesToBlockList(places) {
+  let lastDay;
+  let dayBlocksInserted = 0;
+  const blocks = [];
+  for (const p of places) {
+    if (p.dayNumber != null && p.dayNumber !== lastDay) {
+      blocks.push({ type: 'day', data: { dayNumber: p.dayNumber, title: p.dayTitle || null } });
+      lastDay = p.dayNumber;
+      dayBlocksInserted++;
+    }
+    const normalized = validateBlockData('place', { ...p, source: 'pdf-import' });
+    if (typeof normalized === 'string') continue;
+    blocks.push({ type: 'place', data: normalized });
+  }
+  return { blocks, dayBlocksInserted, placesInserted: blocks.filter((b) => b.type === 'place').length };
+}
+
+// Shared by /guide/import-trip and /trip/share — both need the same trip -> {title, location,
+// places, bookingBlocks} conversion, one to insert as a local guide, the other to serialize into
+// a GitHub file. Returns { error } (an error() response) on failure, never throws.
+async function tripToGuidePayload(ctx, tripId) {
+  let trip;
+  try {
+    trip = await ctx.trips.getById(tripId);
+  } catch (e) {
+    return { error: error(403, "You don't have access to that trip.") };
+  }
+  if (!trip) return { error: error(404, 'Trip not found') };
+
+  let rawPlaces;
+  try {
+    rawPlaces = toArray(await ctx.trips.getPlaces(tripId));
+  } catch (e) {
+    return { error: error(502, "Could not read that trip's places: " + String(e && e.message || e)) };
+  }
+  let rawDays;
+  try {
+    rawDays = toArray(await ctx.trips.getDays(tripId));
+  } catch {
+    rawDays = [];
+  }
+  let rawReservations = [];
+  try { rawReservations = toArray(await ctx.trips.getReservations(tripId)); } catch {}
+  let rawAccommodations = [];
+  try { rawAccommodations = toArray(await ctx.trips.getAccommodations(tripId)); } catch {}
+
+  const places = rawPlaces.map(tripPlaceRow).filter((p) => p.name);
+  rawDays.sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+
+  const dayNumberByPlaceId = {};
+  const dayTitleByNumber = {};
+  rawDays.forEach((d, i) => {
+    const dayNumber = i + 1;
+    const title = d.title || d.note || d.name;
+    if (title) dayTitleByNumber[dayNumber] = String(title).trim().slice(0, 200);
+    for (const placeId of dayAssignedPlaceIds(d)) dayNumberByPlaceId[placeId] = dayNumber;
+  });
+
+  const asPlaces = places.map((p) => {
+    const dayNumber = p.id != null && dayNumberByPlaceId[p.id] != null ? dayNumberByPlaceId[p.id] : null;
+    return {
+      name: p.name, category: p.category, address: p.address, description: p.description,
+      lat: p.lat, lon: p.lon, dayNumber,
+      dayTitle: dayNumber != null ? (dayTitleByNumber[dayNumber] || null) : null,
+    };
+  });
+  asPlaces.sort((a, b) => {
+    if (a.dayNumber == null && b.dayNumber == null) return 0;
+    if (a.dayNumber == null) return 1;
+    if (b.dayNumber == null) return -1;
+    return a.dayNumber - b.dayNumber;
+  });
+
+  const sanitized = asPlaces.map(sanitizePdfPlace).filter(Boolean);
+  const hasDays = sanitized.some((p) => p.dayNumber != null);
+  const title = (trip.title && String(trip.title).trim().slice(0, 200)) || 'Imported trip';
+  const location = trip.location ? String(trip.location).trim().slice(0, 200) : null;
+
+  const bookingItems = [
+    ...rawReservations.map(tripReservationText),
+    ...rawAccommodations.map(tripAccommodationText),
+  ].filter(Boolean);
+  bookingItems.sort((a, b) => a.sortDate.localeCompare(b.sortDate));
+  const bookingBlocks = [];
+  if (bookingItems.length) {
+    const headingData = validateBlockData('heading', { text: 'Travel & Stays', level: 'medium' });
+    bookingBlocks.push({ type: 'heading', data: headingData });
+    for (const item of bookingItems) {
+      const bodyData = validateBlockData('body', { text: item.text });
+      if (typeof bodyData !== 'string') bookingBlocks.push({ type: 'body', data: bodyData });
+    }
+  }
+
+  return { title, location, hasDays, sanitized, bookingItems, bookingBlocks, totalPlaces: places.length };
+}
+
+function slugify(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'trip';
+}
+
+// Seed body for the Discussion opened alongside a Share Trip PR — sets the frame for replies
+// ("Suggestions" the client's comment box posts into) rather than leaving a blank thread, and
+// links back to the PR so a reader can see the actual itinerary being discussed before it merges.
+function buildTripDiscussionBody(trip, prUrl) {
+  const lines = [
+    `**${trip.title}**${trip.location ? ` — ${trip.location}` : ''}`,
+    '',
+    trip.dayCount ? `${trip.dayCount} day${trip.dayCount === 1 ? '' : 's'}, ${trip.placeCount} place${trip.placeCount === 1 ? '' : 's'}.` : `${trip.placeCount} place${trip.placeCount === 1 ? '' : 's'}, no day breakdown.`,
+    '',
+    `Shared via the Featured Guides plugin. The full itinerary is in the linked pull request — once merged it'll show up under Community Trips for anyone to import.`,
+    '',
+    `➡️ ${prUrl}`,
+    '',
+    '---',
+    '',
+    'Been here, or planning to go? Drop a suggestion below — a place to add, a day to reorder, a warning about something that\'s changed. The trip\'s author can fold any of it back in before or after the PR merges.',
+  ];
+  return lines.join('\n');
+}
+
 const TEMPLATES = ['blank', 'list', 'itinerary'];
 const BLOCK_TYPES = ['day', 'heading', 'body', 'quote', 'divider', 'image', 'link', 'guide', 'activity', 'place'];
 const HEADING_LEVELS = ['normal', 'medium', 'large'];
@@ -1128,6 +1313,25 @@ module.exports = definePlugin({
       ALTER TABLE guides ADD COLUMN marketplace_updated_at TEXT;
     `);
     await ctx.db.migrate('007_tags', `ALTER TABLE guides ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`);
+    // One row per TREK trip that's been shared to Community Trips — tripId is a host-managed
+    // ctx.trips id, not one of this plugin's own guide ids, so it can't live as a column on
+    // `guides`. Lets the client show "PR open"/"view suggestions" instead of re-sharing, and
+    // gives /trip/:id/suggestions the discussion to read from without another GitHub round trip.
+    await ctx.db.migrate('008_trip_shares', `
+      CREATE TABLE IF NOT EXISTS trip_shares (
+        trip_id INTEGER PRIMARY KEY,
+        slug TEXT NOT NULL,
+        pr_url TEXT,
+        discussion_number INTEGER,
+        discussion_url TEXT,
+        shared_by TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    // GraphQL's addDiscussionComment mutation takes the discussion's GraphQL node id, not its
+    // REST-style number — stored once at share time so posting a suggestion never needs an
+    // extra lookup call.
+    await ctx.db.migrate('009_trip_shares_node_id', `ALTER TABLE trip_shares ADD COLUMN discussion_node_id TEXT;`);
 
     // One-time data migration: fold the old flat guide_places rows into the new block
     // model, so content created before this update isn't stranded. Guarded by a plain
@@ -2154,86 +2358,9 @@ module.exports = definePlugin({
         const tripId = Number(b.tripId);
         if (!Number.isInteger(tripId)) return error(400, 'tripId is required');
 
-        let trip;
-        try {
-          trip = await ctx.trips.getById(tripId);
-        } catch (e) {
-          return error(403, "You don't have access to that trip.");
-        }
-        if (!trip) return error(404, 'Trip not found');
-
-        let rawPlaces;
-        try {
-          rawPlaces = toArray(await ctx.trips.getPlaces(tripId));
-        } catch (e) {
-          return error(502, "Could not read that trip's places: " + String(e && e.message || e));
-        }
-        let rawDays;
-        try {
-          rawDays = toArray(await ctx.trips.getDays(tripId));
-        } catch {
-          rawDays = []; // non-fatal — the guide just comes in as a flat, unscheduled list instead
-        }
-        // Flights and hotel bookings used to be silently excluded entirely — brought in now as a
-        // short "Travel & Stays" text section instead (never scheduled onto a day like a real
-        // place; this plugin has no place model for them, same reasoning the TREK-native PDF
-        // parser above already documents). Both non-fatal: an older host without these two
-        // methods yet, or a trip with none, just means an empty section that's skipped below.
-        let rawReservations = [];
-        try { rawReservations = toArray(await ctx.trips.getReservations(tripId)); } catch {}
-        let rawAccommodations = [];
-        try { rawAccommodations = toArray(await ctx.trips.getAccommodations(tripId)); } catch {}
-
-        const places = rawPlaces.map(tripPlaceRow).filter((p) => p.name);
-        rawDays.sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
-
-        const dayNumberByPlaceId = {};
-        const dayTitleByNumber = {};
-        rawDays.forEach((d, i) => {
-          const dayNumber = i + 1;
-          const title = d.title || d.note || d.name;
-          if (title) dayTitleByNumber[dayNumber] = String(title).trim().slice(0, 200);
-          for (const placeId of dayAssignedPlaceIds(d)) dayNumberByPlaceId[placeId] = dayNumber;
-        });
-
-        const asPlaces = places.map((p) => {
-          const dayNumber = p.id != null && dayNumberByPlaceId[p.id] != null ? dayNumberByPlaceId[p.id] : null;
-          return {
-            name: p.name, category: p.category, address: p.address, description: p.description,
-            lat: p.lat, lon: p.lon, dayNumber,
-            dayTitle: dayNumber != null ? (dayTitleByNumber[dayNumber] || null) : null,
-          };
-        });
-        // Keep the trip's own day order (assigned places grouped by day, in date order);
-        // unscheduled places (no day match found) are appended at the end rather than dropped —
-        // the same "still included, just not scheduled" fallback /guide/plan-trip already uses
-        // in the opposite direction (guide -> trip) when a place falls outside the chosen dates.
-        asPlaces.sort((a, b) => {
-          if (a.dayNumber == null && b.dayNumber == null) return 0;
-          if (a.dayNumber == null) return 1;
-          if (b.dayNumber == null) return -1;
-          return a.dayNumber - b.dayNumber;
-        });
-
-        const sanitized = asPlaces.map(sanitizePdfPlace).filter(Boolean);
-        const hasDays = sanitized.some((p) => p.dayNumber != null);
-        const title = (trip.title && String(trip.title).trim().slice(0, 200)) || 'Imported trip';
-        const location = trip.location ? String(trip.location).trim().slice(0, 200) : null;
-
-        const bookingItems = [
-          ...rawReservations.map(tripReservationText),
-          ...rawAccommodations.map(tripAccommodationText),
-        ].filter(Boolean);
-        bookingItems.sort((a, b) => a.sortDate.localeCompare(b.sortDate));
-        const bookingBlocks = [];
-        if (bookingItems.length) {
-          const headingData = validateBlockData('heading', { text: 'Travel & Stays', level: 'medium' });
-          bookingBlocks.push({ type: 'heading', data: headingData });
-          for (const item of bookingItems) {
-            const bodyData = validateBlockData('body', { text: item.text });
-            if (typeof bodyData !== 'string') bookingBlocks.push({ type: 'body', data: bodyData });
-          }
-        }
+        const payload = await tripToGuidePayload(ctx, tripId);
+        if (payload.error) return payload.error;
+        const { title, location, hasDays, sanitized, bookingItems, bookingBlocks, totalPlaces } = payload;
 
         await ctx.db.exec(
           'INSERT INTO guides (title, location, description, template) VALUES (?, ?, ?, ?)',
@@ -2254,7 +2381,254 @@ module.exports = definePlugin({
           placeCount: result.placesInserted,
           dayCount: result.dayBlocksInserted,
           bookingCount: bookingItems.length,
-          totalTripPlaces: places.length,
+          totalTripPlaces: totalPlaces,
+        });
+      },
+    },
+    {
+      // Opens a PR against this plugin's own GitHub repo adding the trip as
+      // marketplace/trips/<slug>.json + an index.json entry, plus a Discussion seeded with a
+      // summary + link back to the PR for "Suggestions" comments to land in. Everything is done
+      // with the CLICKING admin's own PAT (githubFetch) so GitHub attributes the commit/PR/
+      // discussion to them, not to this plugin — same reasoning as otmFetch using the admin's own
+      // OpenTripMap key. Idempotent: re-sharing an already-shared trip just returns the existing
+      // links from trip_shares instead of opening a second PR/Discussion.
+      method: 'POST', path: '/trip/share', auth: true,
+      async handler(req, ctx) {
+        const denied = requireAdmin(req); if (denied) return denied;
+        const b = req.body || {};
+        const tripId = Number(b.tripId);
+        if (!Number.isInteger(tripId)) return error(400, 'tripId is required');
+
+        const existing = await ctx.db.query('SELECT * FROM trip_shares WHERE trip_id = ?', tripId);
+        if (existing.length) {
+          const row = existing[0];
+          return json(200, { alreadyShared: true, prUrl: row.pr_url, discussionUrl: row.discussion_url });
+        }
+
+        const token = await ctx.settings.get('github_pat');
+        if (!token) return error(400, "Set your GitHub personal access token in this plugin's settings first.");
+
+        const payload = await tripToGuidePayload(ctx, tripId);
+        if (payload.error) return payload.error;
+        const { title, location, sanitized, bookingBlocks, totalPlaces } = payload;
+
+        const { blocks: placeBlocks, dayBlocksInserted, placesInserted } = placesToBlockList(sanitized);
+        const guidePayload = {
+          guide: { title, location, description: null, template: dayBlocksInserted ? 'itinerary' : 'list' },
+          blocks: [...bookingBlocks, ...placeBlocks],
+        };
+        const slug = `${slugify(title)}-${tripId}`;
+        const today = new Date().toISOString().slice(0, 10);
+        const indexEntry = {
+          id: slug, title, location: location || null, description: null, author: req.user.name || req.user.email || 'a TREK admin',
+          coverPhoto: null, placeCount: placesInserted, days: dayBlocksInserted || null,
+          addedAt: today, updatedAt: today, file: `trips/${slug}.json`,
+        };
+
+        let branch, prUrl, discussionNumber, discussionUrl, discussionNodeId;
+        try {
+          const mainRef = await githubFetch(token, `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/ref/heads/main`);
+          const baseSha = mainRef.object.sha;
+          branch = `share-trip-${slug}`;
+          // A previous attempt at this same share can have gotten partway (branch/PR created,
+          // then a later step — historically the Discussions one below — threw) without ever
+          // reaching the trip_shares INSERT at the bottom, so a retry lands here with the branch
+          // already existing on GitHub even though this plugin's own DB has no record of it.
+          // Treat "already exists" as success and move on rather than failing the retry outright.
+          try {
+            await githubFetch(token, `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/refs`, {
+              method: 'POST',
+              body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: baseSha }),
+            });
+          } catch (e) {
+            if (!/already exists/i.test(String(e && e.message))) throw e;
+          }
+
+          // Reads the branch's own current copy (not main's) so a retry that already committed
+          // on a previous attempt gets that file's real sha instead of guessing whether it needs
+          // one at all — GitHub's Contents API 422s a create-style PUT against a path that
+          // already exists on that ref, and 409s an update-style PUT missing sha for one that does.
+          async function putOnBranch(path, message, computeContent) {
+            let sha, currentText;
+            try {
+              const existingFile = await githubFetch(
+                token, `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}?ref=${branch}`
+              );
+              sha = existingFile.sha;
+              currentText = Buffer.from(existingFile.content, 'base64').toString('utf8');
+            } catch { /* doesn't exist on this branch yet */ }
+            const content = computeContent(currentText);
+            await githubFetch(token, `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${path}`, {
+              method: 'PUT',
+              body: JSON.stringify({ message, content: Buffer.from(content).toString('base64'), branch, ...(sha ? { sha } : {}) }),
+            });
+          }
+
+          await putOnBranch(
+            `marketplace/trips/${slug}.json`,
+            `Add community trip: ${title}`,
+            () => JSON.stringify(guidePayload, null, 2)
+          );
+
+          await putOnBranch(
+            `marketplace/trips/index.json`,
+            `List community trip: ${title}`,
+            (currentText) => {
+              const current = currentText ? JSON.parse(currentText) : [];
+              const withoutThisSlug = current.filter((e) => e.id !== slug);
+              return JSON.stringify([...withoutThisSlug, indexEntry], null, 2);
+            }
+          );
+
+          // A PR from this branch can already be open from a prior attempt that failed after
+          // this point — reuse it instead of erroring on GitHub's "already exists" 422.
+          try {
+            const pr = await githubFetch(token, `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/pulls`, {
+              method: 'POST',
+              body: JSON.stringify({
+                title: `Community trip: ${title}`,
+                head: branch, base: 'main',
+                body: `Shared from a TREK trip via the Featured Guides plugin.\n\n- **${totalPlaces}** places\n- **${dayBlocksInserted || 0}** days\n\nAdds \`marketplace/trips/${slug}.json\` and lists it in \`marketplace/trips/index.json\`.`,
+              }),
+            });
+            prUrl = pr.html_url;
+          } catch (e) {
+            if (!/already exists/i.test(String(e && e.message))) throw e;
+            const existingPrs = await githubFetch(
+              token, `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/pulls?head=${GITHUB_OWNER}:${branch}&state=all`
+            );
+            prUrl = existingPrs[0] && existingPrs[0].html_url;
+          }
+
+          // Repository Discussions have no REST create/list/comment endpoints (only the
+          // unrelated org-level "team discussions" do) — githubGraphQL is required here.
+          const catData = await githubGraphQL(
+            token,
+            `query($owner:String!,$name:String!){ repository(owner:$owner,name:$name){ id discussionCategories(first:10){ nodes{ id name } } } }`,
+            { owner: GITHUB_OWNER, name: GITHUB_REPO }
+          );
+          const repoId = catData.repository.id;
+          const categories = catData.repository.discussionCategories.nodes;
+          const category = categories.find((c) => /general|q&a|ideas/i.test(c.name)) || categories[0];
+          if (!category) throw new Error('This repo has no Discussion categories set up yet.');
+
+          const discussionData = await githubGraphQL(
+            token,
+            `mutation($repoId:ID!,$categoryId:ID!,$title:String!,$body:String!){
+              createDiscussion(input:{repositoryId:$repoId,categoryId:$categoryId,title:$title,body:$body}) {
+                discussion { id number url }
+              }
+            }`,
+            {
+              repoId, categoryId: category.id,
+              title: `Suggestions: ${title}`,
+              body: buildTripDiscussionBody({ title, location, placeCount: totalPlaces, dayCount: dayBlocksInserted || 0 }, prUrl),
+            }
+          );
+          const discussion = discussionData.createDiscussion.discussion;
+          discussionNumber = discussion.number;
+          discussionUrl = discussion.url;
+          discussionNodeId = discussion.id;
+        } catch (e) {
+          return error(502, 'GitHub request failed: ' + String(e && e.message || e));
+        }
+
+        await ctx.db.exec(
+          'INSERT INTO trip_shares (trip_id, slug, pr_url, discussion_number, discussion_url, discussion_node_id, shared_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          tripId, slug, prUrl, discussionNumber, discussionUrl, discussionNodeId, req.user.name || req.user.email || null
+        );
+
+        return json(201, { prUrl, discussionUrl });
+      },
+    },
+    {
+      // Lets the Share Trip picker show "Suggestions" instead of "Share" for a trip that's
+      // already been shared, without a round trip per trip — trip_shares is small (one row per
+      // ever-shared trip), so returning the whole table and matching client-side is simpler than
+      // an IN (...) query keyed off whatever trip ids the picker happens to be showing.
+      method: 'GET', path: '/trip/shares', auth: true,
+      async handler(req, ctx) {
+        const denied = requireAdmin(req); if (denied) return denied;
+        const rows = await ctx.db.query('SELECT trip_id, pr_url, discussion_url FROM trip_shares');
+        return json(200, { shares: rows.map((r) => ({ tripId: r.trip_id, prUrl: r.pr_url, discussionUrl: r.discussion_url })) });
+      },
+    },
+    {
+      // Read side of Community Trips suggestions — proxies the linked Discussion's comments
+      // through the CLICKING admin's own PAT so a private/rate-limited token never has to be
+      // shared with the browser directly.
+      method: 'GET', path: '/trip/suggestions', auth: true,
+      async handler(req, ctx) {
+        const tripId = Number(req.query.tripId);
+        if (!Number.isInteger(tripId)) return error(400, 'tripId is required');
+        const rows = await ctx.db.query('SELECT * FROM trip_shares WHERE trip_id = ?', tripId);
+        if (!rows.length) return json(200, { shared: false, comments: [] });
+        const share = rows[0];
+
+        const token = await ctx.settings.get('github_pat');
+        if (!token) return json(200, { shared: true, prUrl: share.pr_url, discussionUrl: share.discussion_url, comments: [], needsToken: true });
+
+        let comments = [];
+        try {
+          const data = await githubGraphQL(
+            token,
+            `query($owner:String!,$name:String!,$number:Int!){
+              repository(owner:$owner,name:$name){
+                discussion(number:$number){ comments(first:50){ nodes{ id url body createdAt author{ login } } } }
+              }
+            }`,
+            { owner: GITHUB_OWNER, name: GITHUB_REPO, number: share.discussion_number }
+          );
+          const nodes = (data.repository.discussion && data.repository.discussion.comments.nodes) || [];
+          comments = nodes.map((c) => ({
+            id: c.id, author: c.author && c.author.login, body: c.body, createdAt: c.createdAt, url: c.url,
+          }));
+        } catch (e) {
+          return error(502, 'Could not load suggestions: ' + String(e && e.message || e));
+        }
+
+        return json(200, { shared: true, prUrl: share.pr_url, discussionUrl: share.discussion_url, comments });
+      },
+    },
+    {
+      // Write side — posts a suggestion as a Discussion comment under the poster's own GitHub
+      // identity (their own PAT), same attribution reasoning as /trip/share above.
+      method: 'POST', path: '/trip/suggestions', auth: true,
+      async handler(req, ctx) {
+        const tripId = Number((req.body || {}).tripId);
+        if (!Number.isInteger(tripId)) return error(400, 'tripId is required');
+        const body = String((req.body || {}).body || '').trim().slice(0, 2000);
+        if (!body) return error(400, 'Suggestion text is required');
+
+        const rows = await ctx.db.query('SELECT * FROM trip_shares WHERE trip_id = ?', tripId);
+        if (!rows.length) return error(404, "This trip hasn't been shared yet");
+        const share = rows[0];
+
+        const token = await ctx.settings.get('github_pat');
+        if (!token) return error(400, "Set your GitHub personal access token in this plugin's settings first.");
+
+        if (!share.discussion_node_id) return error(500, 'This share has no linked discussion to comment on.');
+
+        let comment;
+        try {
+          const data = await githubGraphQL(
+            token,
+            `mutation($discussionId:ID!,$body:String!){
+              addDiscussionComment(input:{discussionId:$discussionId,body:$body}) {
+                comment { id url body createdAt author{ login } }
+              }
+            }`,
+            { discussionId: share.discussion_node_id, body }
+          );
+          comment = data.addDiscussionComment.comment;
+        } catch (e) {
+          return error(502, 'Could not post suggestion: ' + String(e && e.message || e));
+        }
+
+        return json(201, {
+          id: comment.id, author: comment.author && comment.author.login, body: comment.body,
+          createdAt: comment.createdAt, url: comment.url,
         });
       },
     },
