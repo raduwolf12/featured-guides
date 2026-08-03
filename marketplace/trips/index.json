@@ -1,0 +1,15 @@
+[
+  {
+    "id": "lisbon-potential-trip-11",
+    "title": "Lisbon Potential Trip",
+    "location": null,
+    "description": null,
+    "author": "a TREK admin",
+    "coverPhoto": null,
+    "placeCount": 11,
+    "days": 5,
+    "addedAt": "2026-08-03",
+    "updatedAt": "2026-08-03",
+    "file": "trips/lisbon-potential-trip-11.json"
+  }
+]
