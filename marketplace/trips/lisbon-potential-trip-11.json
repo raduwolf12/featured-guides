@@ -1,0 +1,221 @@
+{
+  "guide": {
+    "title": "Lisbon Potential Trip",
+    "location": null,
+    "description": null,
+    "template": "itinerary"
+  },
+  "blocks": [
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 1,
+        "title": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Oceanário de Lisboa",
+        "category": null,
+        "description": "World-class oceanarium in the modern riverside district.",
+        "address": "Oceanário de Lisboa, Parque das Nações, Lisbon, Portugal",
+        "lat": 38.7635196,
+        "lon": -9.0937161,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 2,
+        "title": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Santa Justa Lift",
+        "category": null,
+        "description": "Historic elevator linking Baixa and Carmo with city views.",
+        "address": "Santa Justa Lift, Lisbon, Portugal",
+        "lat": 38.7121169,
+        "lon": -9.1393753,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 3,
+        "title": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Alfama District",
+        "category": null,
+        "description": "Oldest quarter of Lisbon with traditional lanes and viewpoints.",
+        "address": "Alfama, Lisbon, Portugal",
+        "lat": 38.7117704,
+        "lon": -9.12838,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 4,
+        "title": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Jerónimos Monastery",
+        "category": null,
+        "description": "UNESCO monastery and major Manueline architecture highlight.",
+        "address": "Jerónimos Monastery, Praça do Império, Belém, Lisbon, Portugal",
+        "lat": 38.6977531,
+        "lon": -9.2055912,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    },
+    {
+      "type": "day",
+      "data": {
+        "dayNumber": 5,
+        "title": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Miradouro da Senhora do Monte",
+        "category": null,
+        "description": "One of the best panoramic viewpoints in Lisbon.",
+        "address": "Miradouro Nossa Senhora do Monte, Lisbon, Portugal",
+        "lat": 38.7191589,
+        "lon": -9.1328103,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Time Out Market Lisboa",
+        "category": null,
+        "description": "Top food market with many local chef stalls.",
+        "address": "Time Out Market Lisboa, Lisbon, Portugal",
+        "lat": 38.7070934,
+        "lon": -9.1458973,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "National Tile Museum",
+        "category": null,
+        "description": "Best museum for Portuguese azulejo tile art.",
+        "address": "National Ceramic Tile Museum, Lisbon, Portugal",
+        "lat": 38.7247242,
+        "lon": -9.113914,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "LX Factory",
+        "category": null,
+        "description": "Creative hub with shops, cafes, and street art.",
+        "address": "LX Factory, Alcântara, Lisbon, Portugal",
+        "lat": 38.7026001,
+        "lon": -9.1786619,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "São Jorge Castle",
+        "category": null,
+        "description": "Historic hilltop castle with panoramic city views.",
+        "address": "São Jorge Castle, Lisbon, Portugal",
+        "lat": 38.7139258,
+        "lon": -9.133483,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Belém Tower",
+        "category": null,
+        "description": "Iconic riverside fortress and UNESCO landmark.",
+        "address": "Tower of Belém, Avenida de Brasília, Belém, Lisbon, Portugal",
+        "lat": 38.691586,
+        "lon": -9.2159288,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    },
+    {
+      "type": "place",
+      "data": {
+        "name": "Praça do Comércio",
+        "category": null,
+        "description": "Grand waterfront square in central Lisbon.",
+        "address": "Comércio Square, Lisbon, Portugal",
+        "lat": 38.7077934,
+        "lon": -9.1365543,
+        "rating": null,
+        "tips": [],
+        "photoDataUri": null,
+        "source": "pdf-import",
+        "xid": null
+      }
+    }
+  ]
+}
