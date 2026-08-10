@@ -2184,185 +2184,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
       });
   }
 
-  // ---------------- Share a trip to Community Trips ----------------
-  // Same trip-picker shape as openImportTripModal above, but the picked trip goes out to
-  // /trip/share instead of coming in as a local guide — opens a PR + Discussion on the
-  // marketplace repo using the admin's own github_pat setting.
-  function openShareTripModal() {
-    modalRoot.innerHTML =
-      '<div class="modal-backdrop" id="backdrop">' +
-        '<div class="modal">' +
-          '<h3>Share a trip to Community Trips</h3>' +
-          '<p class="trek-muted" style="margin:0 0 14px">' +
-            'Opens a pull request against the marketplace repo with this trip\'s places and days, ' +
-            'plus a Discussion thread for suggestions. Needs a GitHub personal access token set in ' +
-            'this plugin\'s settings first.' +
-          '</p>' +
-          '<div id="shareTripList" class="trek-muted">Loading your trips…</div>' +
-          '<div class="btn-row" style="margin-top:14px;justify-content:flex-end">' +
-            '<button class="trek-btn trek-btn--secondary" id="stCancel" type="button">Cancel</button>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
-    document.getElementById('backdrop').addEventListener('click', function (e) { if (e.target.id === 'backdrop') closeModal(); });
-    document.getElementById('stCancel').addEventListener('click', closeModal);
-
-    Promise.all([
-      state.trips ? Promise.resolve(state.trips) : api('/trips').then(function (d) { state.trips = d.trips; return d.trips; }),
-      api('/trip/shares').then(function (d) { return d.shares; }).catch(function () { return []; }),
-    ])
-      .then(function (results) {
-        var trips = results[0];
-        var shares = results[1];
-        var shareByTripId = {};
-        shares.forEach(function (s) { shareByTripId[s.tripId] = s; });
-
-        var box = document.getElementById('shareTripList');
-        if (!box) return;
-        if (!trips || !trips.length) { box.textContent = "You don't have any trips yet."; return; }
-        box.innerHTML = trips.map(function (t) {
-          var share = shareByTripId[t.id];
-          return '<div class="trip-pick"><span>' + esc(t.title) + '</span>' +
-            (share
-              ? '<button class="trek-btn trek-btn--secondary" data-view-suggestions="' + t.id + '" type="button">Suggestions</button>'
-              : '<button class="trek-btn trek-btn--primary" data-trip="' + t.id + '" type="button">Share</button>') +
-            '</div>';
-        }).join('');
-        box.querySelectorAll('button[data-trip]').forEach(function (btn) {
-          btn.addEventListener('click', function () {
-            var tripId = Number(btn.getAttribute('data-trip'));
-            btn.textContent = 'Sharing…'; btn.disabled = true;
-            apiWithRetry('/trip/share', { method: 'POST', body: { tripId: tripId } })
-              .then(function (d) {
-                closeModal();
-                d.tripId = tripId;
-                openShareResultModal(d);
-              })
-              .catch(function (e) {
-                btn.textContent = 'Share'; btn.disabled = false;
-                trek.notify('error', (e && e.message) || 'Could not share this trip.');
-              });
-          });
-        });
-        box.querySelectorAll('button[data-view-suggestions]').forEach(function (btn) {
-          btn.addEventListener('click', function () {
-            openTripSuggestionsModal(Number(btn.getAttribute('data-view-suggestions')));
-          });
-        });
-      })
-      .catch(function () {
-        var box = document.getElementById('shareTripList');
-        if (box) box.textContent = "Couldn't load your trips — try closing and reopening this.";
-      });
-  }
-
-  // Shown right after a successful (or already-done) share — the PR still needs a human
-  // (repo owner) to review and merge before it shows up under the Community Trips tab, so this
-  // is deliberately "here's where to watch", not "it's live now".
-  function openShareResultModal(d) {
-    modalRoot.innerHTML =
-      '<div class="modal-backdrop" id="backdrop">' +
-        '<div class="modal">' +
-          '<h3>' + (d.alreadyShared ? 'Already shared' : 'Shared!') + '</h3>' +
-          '<p class="trek-muted" style="margin:0 0 14px">' +
-            (d.alreadyShared
-              ? 'This trip already has an open share. '
-              : 'A pull request and a suggestions thread were opened just now. ') +
-            'Once the pull request is reviewed and merged, the trip appears under the ' +
-            '<strong>Community Trips</strong> tab of the marketplace for anyone to import.' +
-          '</p>' +
-          '<div class="btn-row" style="gap:8px;flex-wrap:wrap">' +
-            '<button class="trek-btn trek-btn--secondary" id="srViewPr" type="button">View pull request</button>' +
-            '<button class="trek-btn trek-btn--secondary" id="srViewSuggestions" type="button">View suggestions</button>' +
-          '</div>' +
-          '<div class="btn-row" style="margin-top:14px;justify-content:flex-end">' +
-            '<button class="trek-btn trek-btn--secondary" id="srClose" type="button">Close</button>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
-    document.getElementById('backdrop').addEventListener('click', function (e) { if (e.target.id === 'backdrop') closeModal(); });
-    document.getElementById('srClose').addEventListener('click', closeModal);
-    // Plain <a target="_blank"> is silently blocked — the plugin iframe's sandbox has no
-    // allow-popups — and a plain navigation would sever the trek:* bridge for the rest of this
-    // session (same reasoning as the map attribution link above). Route through the host instead.
-    document.getElementById('srViewPr').addEventListener('click', function () { trek.openExternal(d.prUrl); });
-    document.getElementById('srViewSuggestions').addEventListener('click', function () {
-      if (d.tripId != null) { openTripSuggestionsModal(d.tripId); }
-      else { trek.openExternal(d.discussionUrl); }
-    });
-  }
-
-  // ---------------- Suggestions on a shared trip ----------------
-  // Proxied through this plugin's own server (/trip/suggestions) rather than fetched straight
-  // from the GitHub API client-side — api.github.com is only in this plugin's egress allowlist
-  // for the server's own outbound fetch, and posting a comment needs the admin's PAT, which
-  // never leaves ctx.settings.
-  function openTripSuggestionsModal(tripId) {
-    modalRoot.innerHTML =
-      '<div class="modal-backdrop" id="backdrop">' +
-        '<div class="modal">' +
-          '<div class="btn-row" style="justify-content:space-between;align-items:center">' +
-            '<h3 style="margin:0">Suggestions</h3>' +
-            '<button class="icon-btn" id="sgViewOnGithub" type="button" title="Open discussion on GitHub" style="display:none">' + ICONS.upload + '</button>' +
-          '</div>' +
-          '<div id="suggestionsList" class="trek-muted">Loading…</div>' +
-          '<div class="btn-row" style="margin-top:10px">' +
-            '<input type="text" id="suggestionInput" placeholder="Add a suggestion…" maxlength="2000" style="flex:1">' +
-            '<button class="trek-btn trek-btn--primary" id="suggestionPost" type="button">Post</button>' +
-          '</div>' +
-          '<div class="btn-row" style="margin-top:14px;justify-content:flex-end">' +
-            '<button class="trek-btn trek-btn--secondary" id="sgClose" type="button">Close</button>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
-    document.getElementById('backdrop').addEventListener('click', function (e) { if (e.target.id === 'backdrop') closeModal(); });
-    document.getElementById('sgClose').addEventListener('click', closeModal);
-
-    function renderComments(comments) {
-      var box = document.getElementById('suggestionsList');
-      if (!box) return;
-      if (!comments.length) { box.innerHTML = '<div class="trek-muted">No suggestions yet — be the first.</div>'; return; }
-      box.innerHTML = comments.map(function (c) {
-        return '<div class="suggestion-item" style="margin-bottom:10px">' +
-          '<strong>' + esc(c.author || 'someone') + '</strong>' +
-          '<div>' + esc(c.body) + '</div>' +
-        '</div>';
-      }).join('');
-    }
-
-    api('/trip/suggestions?tripId=' + tripId)
-      .then(function (d) {
-        if (d.discussionUrl) {
-          var viewBtn = document.getElementById('sgViewOnGithub');
-          viewBtn.style.display = '';
-          viewBtn.addEventListener('click', function () { trek.openExternal(d.discussionUrl); });
-        }
-        if (!d.shared) { renderComments([]); return; }
-        if (d.needsToken) {
-          document.getElementById('suggestionsList').innerHTML =
-            '<div class="trek-muted">Set a GitHub personal access token in this plugin\'s settings to read and post suggestions.</div>';
-          return;
-        }
-        renderComments(d.comments || []);
-      })
-      .catch(function () {
-        var box = document.getElementById('suggestionsList');
-        if (box) box.textContent = "Couldn't load suggestions.";
-      });
-
-    document.getElementById('suggestionPost').addEventListener('click', function () {
-      var input = document.getElementById('suggestionInput');
-      var body = input.value.trim();
-      if (!body) return;
-      this.disabled = true;
-      apiWithRetry('/trip/suggestions', { method: 'POST', body: { tripId: tripId, body: body } })
-        .then(function () { return api('/trip/suggestions?tripId=' + tripId); })
-        .then(function (d) { renderComments(d.comments || []); input.value = ''; })
-        .catch(function () { trek.notify('error', 'Could not post that suggestion.'); })
-        .then(function () { document.getElementById('suggestionPost').disabled = false; });
-    });
-  }
-
   // ---------------- Import from PDF ----------------
   // pdf.js (both the main library and its worker) is inlined directly into this document near
   // the end of <body> — NOT loaded as a separate ./vendor/pdfjs/*.js asset at runtime, even
@@ -2801,17 +2622,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
       searchPlaceholder: 'Search templates…',
       trackImportState: false,
     },
-    trips: {
-      indexUrl: MARKETPLACE_BASE + 'trips/index.json',
-      label: 'Community trips',
-      intro: 'Real trips other TREK admins have shared. Press ' + ICONS.eye + ' to see a trip\'s ' +
-        'itinerary and its Suggestions thread together, reply right there, or Import it as a ' +
-        '<strong>Draft</strong> guide of your own.',
-      emptyIndex: 'No community trips shared yet — be the first from the guide-management screen.',
-      emptyFiltered: 'No shared trips match your search.',
-      searchPlaceholder: 'Search community trips…',
-      trackImportState: true,
-    },
   };
 
   // Splits a guide's blocks into pieces no bigger than maxBytes (measured as serialized JSON —
@@ -2916,11 +2726,12 @@ svg.leaflet-image-layer.leaflet-interactive path {
   var marketplaceMode = 'guides'; // remembers which tab was last open, across separate modal opens too
   var marketplaceOpts = {}; // remembers standalone-ness alongside it, so Preview's Back returns to the same shape
 
-  // standalone (opts.standalone) drops the Guides/Templates/Community Trips tab row entirely —
-  // used for the dedicated Community Trips entry point on the public Guides page, which has no
-  // business surfacing guide-marketplace/template browsing at all, only trips.
+  // standalone (opts.standalone) drops the Guides/Templates tab row entirely — currently unused
+  // (its one caller, the public Guides page's Community Trips entry point, moved to the separate
+  // Community Trips plugin) but left in place since it costs nothing and a future single-mode
+  // entry point may want it again.
   function openMarketplaceModal(mode, opts) {
-    mode = (mode === 'templates' || mode === 'trips') ? mode : 'guides';
+    mode = mode === 'templates' ? mode : 'guides';
     opts = opts || {};
     marketplaceMode = mode;
     marketplaceOpts = opts;
@@ -2930,7 +2741,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
       '<div class="btn-row" style="gap:8px;margin-bottom:10px">' +
         '<button class="trek-btn trek-btn--' + (mode === 'guides' ? 'primary' : 'secondary') + '" id="marketTabGuides" type="button">Guides</button>' +
         '<button class="trek-btn trek-btn--' + (mode === 'templates' ? 'primary' : 'secondary') + '" id="marketTabTemplates" type="button">Templates</button>' +
-        '<button class="trek-btn trek-btn--' + (mode === 'trips' ? 'primary' : 'secondary') + '" id="marketTabTrips" type="button">Community Trips</button>' +
       '</div>';
 
     modalRoot.innerHTML =
@@ -2950,7 +2760,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
     if (!opts.standalone) {
       document.getElementById('marketTabGuides').addEventListener('click', function () { if (mode !== 'guides') openMarketplaceModal('guides'); });
       document.getElementById('marketTabTemplates').addEventListener('click', function () { if (mode !== 'templates') openMarketplaceModal('templates'); });
-      document.getElementById('marketTabTrips').addEventListener('click', function () { if (mode !== 'trips') openMarketplaceModal('trips'); });
     }
 
     var listEl = document.getElementById('marketplaceList');
@@ -3013,7 +2822,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
             '<div class="market-row-progress" style="display:none"><div class="market-row-progress-fill"></div></div>' +
           '</div>' +
           '<div class="market-actions">' +
-            '<button class="icon-btn" data-preview-key="' + esc(key) + '" type="button" title="' + (mode === 'trips' ? 'View trip and suggestions' : 'Preview') + '" aria-label="Preview “' + esc(e.title || 'Untitled') + '”">' + ICONS.eye + '</button>' +
+            '<button class="icon-btn" data-preview-key="' + esc(key) + '" type="button" title="Preview" aria-label="Preview “' + esc(e.title || 'Untitled') + '”">' + ICONS.eye + '</button>' +
             '<button class="trek-btn trek-btn--primary" data-import-key="' + esc(key) + '" type="button">' + ICONS.plus + ' ' + buttonLabel + '</button>' +
           '</div>' +
         '</div>';
@@ -3034,8 +2843,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       listEl.querySelectorAll('button[data-preview-key]').forEach(function (btn) {
         btn.addEventListener('click', function () {
           var entry = entries.find(function (e) { return marketplaceEntryKey(e) === btn.getAttribute('data-preview-key'); });
-          if (mode === 'trips') openCommunityTripModal(entry);
-          else openMarketplacePreviewModal(entry);
+          openMarketplacePreviewModal(entry);
         });
       });
       updateBulkRow();
@@ -3182,133 +2990,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
           ? '<div class="trek-muted">' + esc(cfg.emptyIndex) + '</div>'
           : '<div class="trek-muted">' + esc((e && e.message) || 'Could not load the marketplace.') + '</div>';
       });
-  }
-
-  // The Community Trips equivalent of openMarketplacePreviewModal below, but combined with its
-  // Suggestions thread in one view instead of sending the admin out to GitHub to read replies —
-  // the whole point of building Suggestions in the first place. Fetches the trip's own JSON for
-  // the itinerary and /marketplace/trip-comments (keyed by discussionUrl, not a local trip_shares
-  // row — this trip usually belongs to a DIFFERENT admin's instance) for the comments.
-  function openCommunityTripModal(entry) {
-    if (!entry) return;
-    modalRoot.innerHTML =
-      '<div class="modal-backdrop" id="ctBackdrop"><div class="modal" style="max-width:640px">' +
-        '<h3>' + esc(entry.title || 'Trip') + '</h3>' +
-        (entry.location ? '<div class="loc">' + ICONS.pin + esc(entry.location) + '</div>' : '') +
-        '<div id="communityTripItinerary" class="trek-muted" style="margin-top:10px">Loading…</div>' +
-        '<h4 style="margin:18px 0 8px">Suggestions</h4>' +
-        '<div id="communityTripComments" class="trek-muted">Loading…</div>' +
-        '<div class="btn-row" style="margin-top:10px">' +
-          '<input type="text" id="communityTripSuggestionInput" placeholder="Add a suggestion…" maxlength="2000" style="flex:1">' +
-          '<button class="trek-btn trek-btn--primary" id="communityTripSuggestionPost" type="button">Post</button>' +
-        '</div>' +
-        '<div class="btn-row" style="margin-top:14px;justify-content:flex-end;gap:8px">' +
-          '<button class="trek-btn trek-btn--secondary" id="ctBack" type="button">Back to marketplace</button>' +
-          '<button class="trek-btn trek-btn--primary" id="ctImport" type="button">' + ICONS.plus + ' Import</button>' +
-        '</div>' +
-      '</div></div>';
-    document.getElementById('ctBackdrop').addEventListener('click', function (e) { if (e.target.id === 'ctBackdrop') closeModal(); });
-    document.getElementById('ctBack').addEventListener('click', function () { openMarketplaceModal(marketplaceMode, marketplaceOpts); });
-    document.getElementById('ctImport').addEventListener('click', function () {
-      var btn = document.getElementById('ctImport');
-      btn.textContent = 'Importing…'; btn.disabled = true;
-      fetchAndImportGuide(entry, function (part, total) {
-        if (total > 1) btn.textContent = 'Importing… (part ' + part + ' of ' + total + ')';
-      }).then(function (guideId) {
-        trek.notify('success', 'Imported "' + entry.title + '" as a draft.');
-        closeModal();
-        return loadGuides().then(function () { openGuide(guideId, 'admin-guide'); });
-      }).catch(function (e2) {
-        trek.notify('error', (e2 && e2.message) || 'Could not import that guide.');
-        btn.textContent = 'Import'; btn.disabled = false;
-      });
-    });
-
-    // ---- Itinerary ----
-    var itinEl = document.getElementById('communityTripItinerary');
-    fetchMarketplaceJson(entry.file, entry.title)
-      .then(function (payload) {
-        var blocks = Array.isArray(payload.blocks) ? payload.blocks : [];
-        var introBlocks = [];
-        var days = [];
-        var currentDay = null;
-        blocks.forEach(function (b) {
-          if (b.type === 'day') {
-            currentDay = { title: (b.data && b.data.title) || null, dayNumber: b.data && b.data.dayNumber, places: [] };
-            days.push(currentDay);
-          } else if (b.type === 'place' || b.type === 'activity') {
-            var target = currentDay || (days.length ? days[days.length - 1] : null);
-            if (target) target.places.push(b.data || {});
-            else { if (!days.length || days[0].dayNumber != null) days.unshift({ title: null, dayNumber: null, places: [] }); days[0].places.push(b.data || {}); }
-          } else if (b.type === 'heading' || b.type === 'body') {
-            introBlocks.push(b);
-          }
-        });
-
-        itinEl.className = '';
-        itinEl.innerHTML =
-          (payload.guide.description ? '<p style="margin:0 0 10px">' + esc(payload.guide.description).slice(0, 400) + '</p>' : '') +
-          introBlocks.map(function (b) {
-            return b.type === 'heading'
-              ? '<div style="font-weight:600;margin:10px 0 4px">' + esc((b.data && b.data.text) || '') + '</div>'
-              : '<p class="trek-muted" style="margin:2px 0">' + esc((b.data && b.data.text) || '') + '</p>';
-          }).join('') +
-          '<div style="max-height:280px;overflow:auto;margin-top:6px">' +
-            days.map(function (d, i) {
-              var heading = d.dayNumber != null ? 'Day ' + d.dayNumber + (d.title ? ': ' + esc(d.title) : '') : (days.length > 1 ? 'Unscheduled' : '');
-              return (heading ? '<div style="font-weight:600;margin:10px 0 4px">' + heading + '</div>' : '') +
-                d.places.map(function (p) {
-                  return '<div style="padding:6px 0;border-bottom:1px solid var(--border-faint)">' +
-                    '<strong>' + esc(p.name || 'Untitled') + '</strong> ' + categoryChipHtml(p.category) +
-                    (p.address ? '<div class="trek-muted" style="font-size:12px">' + esc(p.address) + '</div>' : '') +
-                    (p.description ? '<div style="font-size:13px;margin-top:2px">' + esc(p.description).slice(0, 200) + '</div>' : '') +
-                  '</div>';
-                }).join('');
-            }).join('') +
-          '</div>';
-      })
-      .catch(function (e) {
-        itinEl.innerHTML = '<div class="trek-muted">' + esc(e.message || "Could not load this trip's itinerary.") + '</div>';
-      });
-
-    // ---- Suggestions ----
-    var commentsEl = document.getElementById('communityTripComments');
-    function renderTripComments(comments) {
-      if (!comments.length) { commentsEl.innerHTML = '<div class="trek-muted">No suggestions yet — be the first.</div>'; return; }
-      commentsEl.innerHTML = comments.map(function (c) {
-        return '<div style="margin-bottom:10px">' +
-          '<strong>' + esc(c.author || 'someone') + '</strong>' +
-          '<div>' + esc(c.body) + '</div>' +
-        '</div>';
-      }).join('');
-    }
-    if (!entry.discussionUrl) {
-      commentsEl.innerHTML = '<div class="trek-muted">This trip has no linked suggestions thread.</div>';
-      document.getElementById('communityTripSuggestionInput').disabled = true;
-      document.getElementById('communityTripSuggestionPost').disabled = true;
-    } else {
-      api('/marketplace/trip-comments?discussionUrl=' + encodeURIComponent(entry.discussionUrl))
-        .then(function (d) {
-          if (d.needsToken) {
-            commentsEl.innerHTML = '<div class="trek-muted">Set a GitHub personal access token in this plugin\'s settings to read and post suggestions.</div>';
-            return;
-          }
-          renderTripComments(d.comments || []);
-        })
-        .catch(function () { commentsEl.textContent = 'Could not load suggestions.'; });
-
-      document.getElementById('communityTripSuggestionPost').addEventListener('click', function () {
-        var input = document.getElementById('communityTripSuggestionInput');
-        var body = input.value.trim();
-        if (!body) return;
-        this.disabled = true;
-        apiWithRetry('/marketplace/trip-comments', { method: 'POST', body: { discussionUrl: entry.discussionUrl, body: body } })
-          .then(function () { return api('/marketplace/trip-comments?discussionUrl=' + encodeURIComponent(entry.discussionUrl)); })
-          .then(function (d) { renderTripComments(d.comments || []); input.value = ''; })
-          .catch(function (e) { trek.notify('error', (e && e.message) || 'Could not post that suggestion.'); })
-          .then(function () { document.getElementById('communityTripSuggestionPost').disabled = false; });
-      });
-    }
   }
 
   // A quick look at what's actually inside a marketplace guide (places, day count) before
@@ -3906,9 +3587,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
   function renderList() {
     pageTitle.textContent = 'Guides';
     adminToggleEl.innerHTML =
-      (state.isAdmin || state.hasGithubPat
-        ? '<button class="trek-btn trek-btn--secondary" id="communityTripsBtn" type="button">' + ICONS.store + ' Community Trips</button>'
-        : '') +
       (state.isAdmin ? '<button class="trek-btn trek-btn--secondary" id="toAdmin" type="button">Manage guides</button>' : '');
 
     // Built once per visit to this view, like the search box below (see its own comment) — the
@@ -3957,8 +3635,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
     var toAdmin = document.getElementById('toAdmin');
     if (toAdmin) toAdmin.addEventListener('click', function () { state.view = 'admin'; render(); });
-    var communityTripsBtn = document.getElementById('communityTripsBtn');
-    if (communityTripsBtn) communityTripsBtn.addEventListener('click', function () { openMarketplaceModal('trips', { standalone: true }); });
   }
 
   function renderGuideGrid() {
@@ -4264,7 +3940,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
       '<button class="trek-btn trek-btn--secondary" id="marketplaceBtn" type="button">' + ICONS.store + ' Marketplace</button>' +
       '<button class="trek-btn trek-btn--secondary" id="importPdfBtn" type="button">' + ICONS.upload + ' Import from PDF</button>' +
       '<button class="trek-btn trek-btn--secondary" id="importTripBtn" type="button">' + ICONS.briefcase + ' From a trip</button>' +
-      '<button class="trek-btn trek-btn--secondary" id="shareTripBtn" type="button">' + ICONS.upload + ' Share a trip</button>' +
       '<button class="trek-btn trek-btn--secondary" id="backToList" type="button">' + ICONS.back + ' Back to guides</button>';
 
     var showCreateForm = adminCreateFormOpen || !state.guides.length;
@@ -4497,7 +4172,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
     document.getElementById('importPdfBtn').addEventListener('click', openImportPdfModal);
     document.getElementById('marketplaceBtn').addEventListener('click', openMarketplaceModal);
     document.getElementById('importTripBtn').addEventListener('click', openImportTripModal);
-    document.getElementById('shareTripBtn').addEventListener('click', openShareTripModal);
     var createGuideBtn = document.getElementById('createGuide');
     if (createGuideBtn) createGuideBtn.addEventListener('click', function () {
       var title = document.getElementById('newTitle').value.trim();
@@ -5191,10 +4865,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
   trek.onContext(function (ctx) {
     state.ctx = ctx; state.isAdmin = !!(ctx.user && ctx.user.isAdmin);
     document.documentElement.dataset.theme = ctx.theme === 'dark' ? 'dark' : 'light';
-    // Community Trips is visible to any user who's set a GitHub PAT, not just admins (browsing
-    // and reading a Discussion needs no admin rights — Import/Share still do, server-side).
-    // Non-fatal on failure: worst case the button just doesn't show for a would-be non-admin viewer.
-    api('/me/github-pat-status').then(function (d) { state.hasGithubPat = !!d.hasToken; render(); }).catch(function () {});
     if (!state.guides.length) loadGuides().then(render); else render();
   });
 })();

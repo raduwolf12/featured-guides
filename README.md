@@ -212,22 +212,13 @@ you've committed to dates. Contributing your own works the same way as a
 guide, just saved under `marketplace/templates/` with its own `index.json`
 instead of `marketplace/guides/`.
 
-A third **Community Trips** tab lists real trips other admins have shared —
-not curated guides, actual itineraries from someone's own trip, reviewed via a
-pull request before they land here. From the guide-management screen, **Share
-a trip** picks one of your own trips and opens a pull request against this
-plugin's marketplace repo (adding `marketplace/trips/<slug>.json` and listing
-it in `marketplace/trips/index.json`), plus a GitHub Discussion seeded with a
-summary and a link back to the PR. Anyone can reply there with a suggestion —
-a place to add, a day to reorder, a heads-up about something that's changed —
-without leaving TREK: a **Suggestions** panel reads and posts comments on that
-Discussion through the plugin's own server. Sharing (and posting a
-suggestion) needs a GitHub personal access token pasted into this plugin's
-settings, same per-user pattern as the OpenTripMap key; without one, Share and
-Suggestions both explain what's missing instead of failing silently. A trip
-that's already been shared shows **Suggestions** instead of **Share** in the
-picker, and re-sharing is safe — it reuses the existing pull request and
-Discussion rather than opening duplicates.
+Sharing your own trips and browsing other admins' shared trips — real
+itineraries, not curated guides, each reviewed via a pull request before it's
+listed — now lives in a separate **Community Trips** plugin. It started out
+as a third tab here, but sharing needs its own trust model (a GitHub
+personal access token with write access, public PRs and Discussions) that
+doesn't belong bundled into a plain curated-content library — see that
+plugin's own README for what it does.
 
 ## Screenshots
 
@@ -244,7 +235,6 @@ looks best (the card crops the edges).
 | `http:outbound:*.opentripmap.com` | Lets an admin's guide-editing search reach the OpenTripMap API (and its own thumbnail-image host) to look up destinations, points of interest, and photos, using that admin's own key. |
 | `http:outbound:nominatim.openstreetmap.org` | Lets an imported place that OpenTripMap couldn't match get geocoded from its address instead, via OpenStreetMap's free Nominatim service — no key needed, and it's only ever used as a fallback for places OpenTripMap's own sweep already missed. |
 | `http:outbound:raw.githubusercontent.com` | Lets the guide **Marketplace** list and import ready-made guides published as plain JSON in a public GitHub repo — no key or account needed, and nothing is sent there; it's read-only. |
-| `http:outbound:api.github.com` | Lets **Share a trip** and **Suggestions** open a pull request, commit the trip JSON, and create/read/post on its linked GitHub Discussion, using the admin's own personal access token — never this plugin's. |
 | `http:outbound:basemaps.cartocdn.com` | Lets a guide's **Map** view fetch its basemap tiles from CARTO's free, keyless tile service (the same source TREK's own Collections map uses by default) — read-only, no key or account needed. |
 | `db:read:trips` | Lists the signed-in user's own trips so they can pick which one to add a place into, or (for an admin) which one to import as a new guide. |
 | `db:write:places` | Creates the selected place inside the chosen trip's place pool when a user clicks "Add to trip" or "Plan a trip". |
@@ -266,13 +256,7 @@ looks best (the card crops the edges).
    never need one). A **Test connection** button on that same settings page
    checks the key right away, instead of only finding out it's wrong on the
    first search inside a guide.
-3. Any admin who wants to **Share a trip** to Community Trips or post a
-   **Suggestion** needs a GitHub personal access token, fine-grained and
-   scoped to just `raduwolf12/featured-guides` with Contents, Pull requests
-   and Discussions write access, pasted into their own **GitHub personal
-   access token** field on this plugin's settings page — per-user, same as
-   the OpenTripMap key.
-4. Open the **Guides** page from the main navigation. Admins see a
+3. Open the **Guides** page from the main navigation. Admins see a
    **Manage guides** button to create guides, build their content block by
    block (places by hand, by searching OpenTripMap, or by picking from one of
    their own Collections — the last option needs the Collections addon

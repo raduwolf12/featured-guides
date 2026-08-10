@@ -1,7 +1,7 @@
 {
   "id": "featured-guides",
   "name": "Featured Guides",
-  "version": "1.4.0",
+  "version": "2.0.0",
   "apiVersion": 1,
   "author": "raduwolf12",
   "description": "Curated destination guides enriched with real places to explore, with one-tap add straight into your trip.",
@@ -14,7 +14,6 @@
     "http:outbound:*.opentripmap.com",
     "http:outbound:nominatim.openstreetmap.org",
     "http:outbound:raw.githubusercontent.com",
-    "http:outbound:api.github.com",
     "http:outbound:basemaps.cartocdn.com",
     "db:read:trips",
     "db:write:places",
@@ -32,7 +31,6 @@
     "*.opentripmap.com",
     "nominatim.openstreetmap.org",
     "raw.githubusercontent.com",
-    "api.github.com",
     "basemaps.cartocdn.com"
   ],
   "settings": [
@@ -44,15 +42,6 @@
       "required": false,
       "secret": true,
       "hint": "Free key from dev.opentripmap.org — set your own key to search and import places when curating a guide."
-    },
-    {
-      "key": "github_pat",
-      "label": "GitHub personal access token",
-      "input_type": "password",
-      "scope": "user",
-      "required": false,
-      "secret": true,
-      "hint": "Fine-grained PAT scoped to raduwolf12/featured-guides with Contents, Pull requests and Discussions write access — set your own token to share a trip to Community Trips or post a suggestion."
     }
   ],
   "actions": [
