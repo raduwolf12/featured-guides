@@ -1,12 +1,12 @@
 {
   "id": "featured-guides",
   "name": "Featured Guides",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "apiVersion": 1,
   "author": "raduwolf12",
   "description": "Curated destination guides enriched with real places to explore, with one-tap add straight into your trip.",
   "type": "page",
-  "trek": ">=3.4.0 <4.0.0",
+  "trek": ">=3.4.0 <4.1.0",
   "nativeModules": false,
   "permissions": [
     "db:own",
