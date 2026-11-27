@@ -38,6 +38,74 @@ function requireAdmin(req) {
   return null;
 }
 
+// ---- Engine dialect: SQLite vs Postgres ----
+// TREK keeps a plugin's own DB as a SQLite file on SQLite installs, and as a
+// private Postgres schema per plugin once TREK itself runs on Postgres
+// (TREK_DB_URL). The host reports which one via ctx.db.engine(); hosts without
+// it pre-date the Postgres move and are SQLite-only. SQLite spellings
+// (AUTOINCREMENT, datetime('now'), last_insert_rowid()) are rejected on
+// Postgres, so every such spot branches on the engine. The result is cached:
+// the engine is host-wide and never changes at runtime.
+let cachedEngine = null;
+async function dbEngine(ctx) {
+  if (cachedEngine) return cachedEngine;
+  try {
+    if (ctx.db && typeof ctx.db.engine === 'function') {
+      const e = await ctx.db.engine();
+      if (e === 'postgres' || e === 'sqlite') { cachedEngine = e; return e; }
+    }
+  } catch {
+    // Host without db.engine(): SQLite-only TREK, pre-dates the Postgres move.
+  }
+  cachedEngine = 'sqlite';
+  return cachedEngine;
+}
+function isPostgresEngine(engine) { return engine === 'postgres'; }
+function autoPkColumn(engine) {
+  return isPostgresEngine(engine) ? 'SERIAL PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
+}
+function createdColDefault(engine) {
+  return isPostgresEngine(engine) ? 'DEFAULT (now())' : "DEFAULT (datetime('now'))";
+}
+function nowCall(engine) {
+  return isPostgresEngine(engine) ? 'now()' : "datetime('now')";
+}
+// INSERT + fetch-back of the new row: last_insert_rowid() exists only on
+// SQLite; on Postgres the same statement runs with RETURNING instead.
+async function insertRowAndGet(ctx, table, insertSql, args) {
+  const engine = await dbEngine(ctx);
+  if (isPostgresEngine(engine)) {
+    const rows = await dbQuery(ctx, `${insertSql} RETURNING *`, ...args);
+    return rows[0];
+  }
+  await dbExec(ctx, insertSql, ...args);
+  const rows = await dbQuery(ctx, `SELECT * FROM ${table} WHERE id = last_insert_rowid()`);
+  return rows[0];
+}
+// Placeholders are engine-specific too: SQLite binds `?`, Postgres numbers
+// them $1, $2, … (its guard refuses a bound `?` outright). All db access below
+// goes through these wrappers so the call sites keep the familiar `?`
+// spelling on both engines. Verified: no SQL string here holds a `?` inside
+// a quoted literal, so the rewrite can only hit real placeholders.
+function bindSql(engine, sql) {
+  if (!isPostgresEngine(engine)) return sql;
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
+}
+async function dbQuery(ctx, sql, ...args) {
+  const engine = await dbEngine(ctx);
+  return ctx.db.query(bindSql(engine, sql), ...args);
+}
+async function dbExec(ctx, sql, ...args) {
+  const engine = await dbEngine(ctx);
+  return ctx.db.exec(bindSql(engine, sql), ...args);
+}
+async function dbTx(ctx, ops) {
+  const engine = await dbEngine(ctx);
+  if (!isPostgresEngine(engine)) return ctx.db.tx(ops);
+  return ctx.db.tx(ops.map((op) => ({ ...op, sql: bindSql(engine, op.sql) })));
+}
+
 function parseTips(raw) {
   if (Array.isArray(raw)) return raw.filter((t) => typeof t === 'string' && t.trim()).slice(0, 20);
   return [];
@@ -603,12 +671,12 @@ async function insertPdfPlaceBlocks(ctx, guideId, places, startPos, carryDay) {
   }
   if (typeof ctx.db.tx === 'function') {
     for (let i = 0; i < ops.length; i += 90) { // tx caps out at 100 ops per call — chunk with margin
-      await ctx.db.tx(ops.slice(i, i + 90));
+      await dbTx(ctx, ops.slice(i, i + 90));
     }
   } else {
     // A host old enough not to have ctx.db.tx yet: fall back to throttled individual inserts.
     for (const op of ops) {
-      await ctx.db.exec(op.sql, ...op.args);
+      await dbExec(ctx, op.sql, ...op.args);
       await sleep(RATE_LIMIT_GAP_MS);
     }
   }
@@ -638,9 +706,9 @@ async function insertMarketplaceBlocks(ctx, guideId, startPos, validated) {
     args: [guideId, v.type, startPos + i, JSON.stringify(v.data)],
   }));
   if (typeof ctx.db.tx === 'function') {
-    for (let i = 0; i < ops.length; i += 90) await ctx.db.tx(ops.slice(i, i + 90));
+    for (let i = 0; i < ops.length; i += 90) await dbTx(ctx, ops.slice(i, i + 90));
   } else {
-    for (const op of ops) { await ctx.db.exec(op.sql, ...op.args); await sleep(RATE_LIMIT_GAP_MS); }
+    for (const op of ops) { await dbExec(ctx, op.sql, ...op.args); await sleep(RATE_LIMIT_GAP_MS); }
   }
 }
 
@@ -976,7 +1044,7 @@ async function resolveGuideEmbeds(ctx, blocks, isAdmin) {
   const refIds = [...new Set(blocks.filter((b) => b.type === 'guide').map((b) => b.data.refGuideId).filter((id) => Number.isInteger(id)))];
   if (!refIds.length) return blocks;
   const placeholders = refIds.map(() => '?').join(',');
-  const refs = await ctx.db.query(`SELECT id, title, location, status FROM guides WHERE id IN (${placeholders})`, ...refIds);
+  const refs = await dbQuery(ctx, `SELECT id, title, location, status FROM guides WHERE id IN (${placeholders})`, ...refIds);
   const byId = {};
   for (const r of refs) byId[r.id] = r;
   const out = [];
@@ -1134,17 +1202,18 @@ function daysBetween(startStr, endStr) {
 }
 
 async function nextPosition(ctx, guideId) {
-  const rows = await ctx.db.query('SELECT COALESCE(MAX(position), -1) + 1 AS next FROM guide_blocks WHERE guide_id = ?', guideId);
+  const rows = await dbQuery(ctx, 'SELECT COALESCE(MAX(position), -1) + 1 AS next FROM guide_blocks WHERE guide_id = ?', guideId);
   return rows[0] ? rows[0].next : 0;
 }
 
 async function insertBlock(ctx, guideId, type, data, position) {
-  await ctx.db.exec(
+  const row = await insertRowAndGet(
+    ctx,
+    'guide_blocks',
     'INSERT INTO guide_blocks (guide_id, type, position, data) VALUES (?, ?, ?, ?)',
-    guideId, type, position, JSON.stringify(data)
+    [guideId, type, position, JSON.stringify(data)]
   );
-  const rows = await ctx.db.query('SELECT * FROM guide_blocks WHERE id = last_insert_rowid()');
-  return blockRow(rows[0]);
+  return blockRow(row);
 }
 
 // Bulk-creates `count` day blocks (dayNumber 1..count) starting at `startPos`, batched via
@@ -1161,11 +1230,11 @@ async function insertDayBlocks(ctx, guideId, count, startPos) {
   }
   if (typeof ctx.db.tx === 'function') {
     for (let i = 0; i < ops.length; i += 90) {
-      await ctx.db.tx(ops.slice(i, i + 90));
+      await dbTx(ctx, ops.slice(i, i + 90));
     }
   } else {
     for (const op of ops) {
-      await ctx.db.exec(op.sql, ...op.args);
+      await dbExec(ctx, op.sql, ...op.args);
       await sleep(RATE_LIMIT_GAP_MS);
     }
   }
@@ -1173,17 +1242,23 @@ async function insertDayBlocks(ctx, guideId, count, startPos) {
 
 module.exports = definePlugin({
   async onLoad(ctx) {
+    // DDL is engine-specific (see helpers above): previously-migrated hosts never
+    // re-run these ids, and hosts that failed on the old SQLite-only SQL (Postgres
+    // TREKs) retry with the spelling their engine accepts.
+    const engine = await dbEngine(ctx);
+    const pk = autoPkColumn(engine);
+    const nowDefault = createdColDefault(engine);
     await ctx.db.migrate('001_init', `
       CREATE TABLE IF NOT EXISTS guides (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id ${pk},
         title TEXT NOT NULL,
         location TEXT,
         description TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TEXT NOT NULL ${nowDefault},
+        updated_at TEXT NOT NULL ${nowDefault}
       );
       CREATE TABLE IF NOT EXISTS guide_places (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id ${pk},
         guide_id INTEGER NOT NULL,
         name TEXT NOT NULL,
         category TEXT,
@@ -1197,7 +1272,7 @@ module.exports = definePlugin({
         tips TEXT,
         xid TEXT,
         source TEXT NOT NULL DEFAULT 'manual',
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TEXT NOT NULL ${nowDefault}
       );
     `);
     await ctx.db.migrate('002_photos', `ALTER TABLE guide_places ADD COLUMN photo_data_uri TEXT;`);
@@ -1208,13 +1283,13 @@ module.exports = definePlugin({
     await ctx.db.migrate('004_blocks', `
       ALTER TABLE guides ADD COLUMN status TEXT NOT NULL DEFAULT 'draft';
       CREATE TABLE IF NOT EXISTS guide_blocks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id ${pk},
         guide_id INTEGER NOT NULL,
         type TEXT NOT NULL,
         position INTEGER NOT NULL,
         data TEXT NOT NULL DEFAULT '{}',
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TEXT NOT NULL ${nowDefault},
+        updated_at TEXT NOT NULL ${nowDefault}
       );
     `);
     await ctx.db.migrate('005_featured', `ALTER TABLE guides ADD COLUMN featured INTEGER NOT NULL DEFAULT 0;`);
@@ -1235,12 +1310,12 @@ module.exports = definePlugin({
     // model, so content created before this update isn't stranded. Guarded by a plain
     // count check (not ctx.db.migrate, which only runs static SQL) — safe to leave in
     // place permanently since it's a no-op once guide_blocks has anything in it.
-    const [{ blockCount }] = await ctx.db.query('SELECT COUNT(*) AS blockCount FROM guide_blocks');
-    const [{ placeCount }] = await ctx.db.query('SELECT COUNT(*) AS placeCount FROM guide_places');
+    const [{ blockCount }] = await dbQuery(ctx, 'SELECT COUNT(*) AS blockCount FROM guide_blocks');
+    const [{ placeCount }] = await dbQuery(ctx, 'SELECT COUNT(*) AS placeCount FROM guide_places');
     if (blockCount === 0 && placeCount > 0) {
-      const guides = await ctx.db.query('SELECT id FROM guides');
+      const guides = await dbQuery(ctx, 'SELECT id FROM guides');
       for (const g of guides) {
-        const places = await ctx.db.query(
+        const places = await dbQuery(ctx, 
           'SELECT * FROM guide_places WHERE guide_id = ? ORDER BY (day_number IS NOT NULL) ASC, day_number ASC, id ASC',
           g.id
         );
@@ -1258,7 +1333,7 @@ module.exports = definePlugin({
           }, pos++);
         }
         // Pre-existing guides were already visible to everyone — keep them that way.
-        await ctx.db.exec(`UPDATE guides SET status = 'published' WHERE id = ?`, g.id);
+        await dbExec(ctx, `UPDATE guides SET status = 'published' WHERE id = ?`, g.id);
       }
       ctx.log.info('featured-guides: migrated legacy guide_places into guide_blocks');
     }
@@ -1290,7 +1365,7 @@ module.exports = definePlugin({
       method: 'GET', path: '/guides', auth: true,
       async handler(req, ctx) {
         const isAdmin = !!(req.user && req.user.isAdmin);
-        const guides = await ctx.db.query(
+        const guides = await dbQuery(ctx, 
           isAdmin
             ? 'SELECT * FROM guides ORDER BY featured DESC, created_at DESC'
             : `SELECT * FROM guides WHERE status = 'published' ORDER BY featured DESC, created_at DESC`
@@ -1298,7 +1373,7 @@ module.exports = definePlugin({
         if (!guides.length) return json(200, { guides: [] });
         const ids = guides.map((g) => g.id);
         const placeholders = ids.map(() => '?').join(',');
-        const blocks = await ctx.db.query(
+        const blocks = await dbQuery(ctx, 
           `SELECT guide_id, type, position, data FROM guide_blocks WHERE guide_id IN (${placeholders}) AND type IN ('place','day','image') ORDER BY guide_id, position ASC`,
           ...ids
         );
@@ -1325,11 +1400,11 @@ module.exports = definePlugin({
       async handler(req, ctx) {
         const id = Number(req.query.id);
         if (!Number.isInteger(id)) return error(400, 'id is required');
-        const rows = await ctx.db.query('SELECT * FROM guides WHERE id = ?', id);
+        const rows = await dbQuery(ctx, 'SELECT * FROM guides WHERE id = ?', id);
         if (!rows.length) return error(404, 'Guide not found');
         const isAdmin = !!(req.user && req.user.isAdmin);
         if (rows[0].status !== 'published' && !isAdmin) return error(404, 'Guide not found');
-        const blocks = await ctx.db.query('SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', id);
+        const blocks = await dbQuery(ctx, 'SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', id);
         const mappedBlocks = await resolveGuideEmbeds(ctx, blocks.map(blockRow), isAdmin);
         const place_count = mappedBlocks.filter((b) => b.type === 'place').length;
         const day_count = mappedBlocks.filter((b) => b.type === 'day').length;
@@ -1358,12 +1433,12 @@ module.exports = definePlugin({
           if (!Number.isInteger(dayCount) || dayCount < 1 || dayCount > 60) return error(400, 'dayCount must be a whole number between 1 and 60 for the itinerary template');
         }
         const tags = parseTags(b.tags);
-        await ctx.db.exec(
+        const guide = await insertRowAndGet(
+          ctx,
+          'guides',
           'INSERT INTO guides (title, location, description, template, tags) VALUES (?, ?, ?, ?, ?)',
-          title.trim(), location || null, description || null, template, JSON.stringify(tags)
+          [title.trim(), location || null, description || null, template, JSON.stringify(tags)]
         );
-        const rows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
-        const guide = rows[0];
         if (template === 'itinerary' && dayCount) {
           // Same reason as insertPdfPlaceBlocks/the reorder route: a 60-day itinerary looping
           // insertBlock() one day at a time is up to 120 sequential, unbatched ctx.* calls
@@ -1381,13 +1456,14 @@ module.exports = definePlugin({
         const { id, title, location, description } = b;
         if (!Number.isInteger(id)) return error(400, 'id is required');
         if (!title || typeof title !== 'string' || !title.trim()) return error(400, 'title is required');
-        const existing = await ctx.db.query('SELECT * FROM guides WHERE id = ?', id);
+        const existing = await dbQuery(ctx, 'SELECT * FROM guides WHERE id = ?', id);
         if (!existing.length) return error(404, 'Guide not found');
         const template = b.template !== undefined ? b.template : existing[0].template;
         if (!TEMPLATES.includes(template)) return error(400, `template must be one of: ${TEMPLATES.join(', ')}`);
         const tags = b.tags !== undefined ? parseTags(b.tags) : (() => { try { return JSON.parse(existing[0].tags || '[]'); } catch (e) { return []; } })();
-        await ctx.db.exec(
-          `UPDATE guides SET title = ?, location = ?, description = ?, template = ?, tags = ?, updated_at = datetime('now') WHERE id = ?`,
+        const engine = await dbEngine(ctx);
+        await dbExec(ctx, 
+          `UPDATE guides SET title = ?, location = ?, description = ?, template = ?, tags = ?, updated_at = ${nowCall(engine)} WHERE id = ?`,
           title.trim(), location || null, description || null, template, JSON.stringify(tags), id
         );
         // Switching to the itinerary template from the edit view (unlike at creation time) never
@@ -1396,13 +1472,13 @@ module.exports = definePlugin({
         // itinerary transition (no day blocks yet); a guide that already has days manages them
         // through the normal block editor (+ Add item -> Day) instead of a bulk count here.
         if (template === 'itinerary' && Number.isInteger(b.dayCount) && b.dayCount > 0 && b.dayCount <= 60) {
-          const existingDays = await ctx.db.query(`SELECT COUNT(*) AS n FROM guide_blocks WHERE guide_id = ? AND type = 'day'`, id);
+          const existingDays = await dbQuery(ctx, `SELECT COUNT(*) AS n FROM guide_blocks WHERE guide_id = ? AND type = 'day'`, id);
           if (!existingDays[0].n) {
             const startPos = await nextPosition(ctx, id);
             await insertDayBlocks(ctx, id, b.dayCount, startPos);
           }
         }
-        const rows = await ctx.db.query('SELECT * FROM guides WHERE id = ?', id);
+        const rows = await dbQuery(ctx, 'SELECT * FROM guides WHERE id = ?', id);
         return json(200, { guide: guideRow(rows[0]) });
       },
     },
@@ -1414,10 +1490,11 @@ module.exports = definePlugin({
         const id = Number(b.id);
         if (!Number.isInteger(id)) return error(400, 'id is required');
         const status = b.status === 'published' ? 'published' : 'draft';
-        const existing = await ctx.db.query('SELECT id FROM guides WHERE id = ?', id);
+        const existing = await dbQuery(ctx, 'SELECT id FROM guides WHERE id = ?', id);
         if (!existing.length) return error(404, 'Guide not found');
-        await ctx.db.exec(`UPDATE guides SET status = ?, updated_at = datetime('now') WHERE id = ?`, status, id);
-        const rows = await ctx.db.query('SELECT * FROM guides WHERE id = ?', id);
+        const engine = await dbEngine(ctx);
+        await dbExec(ctx, `UPDATE guides SET status = ?, updated_at = ${nowCall(engine)} WHERE id = ?`, status, id);
+        const rows = await dbQuery(ctx, 'SELECT * FROM guides WHERE id = ?', id);
         return json(200, { guide: guideRow(rows[0]) });
       },
     },
@@ -1427,9 +1504,9 @@ module.exports = definePlugin({
         const denied = requireAdmin(req); if (denied) return denied;
         const id = Number(req.query.id);
         if (!Number.isInteger(id)) return error(400, 'id is required');
-        await ctx.db.exec('DELETE FROM guide_blocks WHERE guide_id = ?', id);
-        await ctx.db.exec('DELETE FROM guide_places WHERE guide_id = ?', id);
-        await ctx.db.exec('DELETE FROM guides WHERE id = ?', id);
+        await dbExec(ctx, 'DELETE FROM guide_blocks WHERE guide_id = ?', id);
+        await dbExec(ctx, 'DELETE FROM guide_places WHERE guide_id = ?', id);
+        await dbExec(ctx, 'DELETE FROM guides WHERE id = ?', id);
         return json(200, { deleted: true });
       },
     },
@@ -1442,10 +1519,11 @@ module.exports = definePlugin({
         const b = req.body || {};
         const id = Number(b.id);
         if (!Number.isInteger(id)) return error(400, 'id is required');
-        const existing = await ctx.db.query('SELECT id FROM guides WHERE id = ?', id);
+        const existing = await dbQuery(ctx, 'SELECT id FROM guides WHERE id = ?', id);
         if (!existing.length) return error(404, 'Guide not found');
-        await ctx.db.exec(`UPDATE guides SET featured = ?, updated_at = datetime('now') WHERE id = ?`, b.featured ? 1 : 0, id);
-        const rows = await ctx.db.query('SELECT * FROM guides WHERE id = ?', id);
+        const engine = await dbEngine(ctx);
+        await dbExec(ctx, `UPDATE guides SET featured = ?, updated_at = ${nowCall(engine)} WHERE id = ?`, b.featured ? 1 : 0, id);
+        const rows = await dbQuery(ctx, 'SELECT * FROM guides WHERE id = ?', id);
         return json(200, { guide: guideRow(rows[0]) });
       },
     },
@@ -1459,26 +1537,26 @@ module.exports = definePlugin({
         const denied = requireAdmin(req); if (denied) return denied;
         const id = Number(req.body && req.body.id);
         if (!Number.isInteger(id)) return error(400, 'id is required');
-        const source = await ctx.db.query('SELECT * FROM guides WHERE id = ?', id);
+        const source = await dbQuery(ctx, 'SELECT * FROM guides WHERE id = ?', id);
         if (!source.length) return error(404, 'Guide not found');
         const src = source[0];
 
-        await ctx.db.exec(
+        const newGuide = await insertRowAndGet(
+          ctx,
+          'guides',
           'INSERT INTO guides (title, location, description, template, tags) VALUES (?, ?, ?, ?, ?)',
-          `${src.title} (Copy)`.slice(0, 200), src.location, src.description, src.template || 'blank', src.tags || '[]'
+          [`${src.title} (Copy)`.slice(0, 200), src.location, src.description, src.template || 'blank', src.tags || '[]']
         );
-        const newGuideRows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
-        const newGuide = newGuideRows[0];
 
-        const blocks = await ctx.db.query('SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', id);
+        const blocks = await dbQuery(ctx, 'SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', id);
         const ops = blocks.map((b) => ({
           sql: 'INSERT INTO guide_blocks (guide_id, type, position, data) VALUES (?, ?, ?, ?)',
           args: [newGuide.id, b.type, b.position, b.data],
         }));
         if (typeof ctx.db.tx === 'function') {
-          for (let i = 0; i < ops.length; i += 90) await ctx.db.tx(ops.slice(i, i + 90));
+          for (let i = 0; i < ops.length; i += 90) await dbTx(ctx, ops.slice(i, i + 90));
         } else {
-          for (const op of ops) { await ctx.db.exec(op.sql, ...op.args); await sleep(RATE_LIMIT_GAP_MS); }
+          for (const op of ops) { await dbExec(ctx, op.sql, ...op.args); await sleep(RATE_LIMIT_GAP_MS); }
         }
 
         return json(201, { guide: guideRow(newGuide) });
@@ -1512,12 +1590,12 @@ module.exports = definePlugin({
         const marketplaceId = b.marketplaceId ? String(b.marketplaceId).trim().slice(0, 200) : null;
         const marketplaceUpdatedAt = b.marketplaceUpdatedAt ? String(b.marketplaceUpdatedAt).trim().slice(0, 40) : null;
 
-        await ctx.db.exec(
+        const newGuide = await insertRowAndGet(
+          ctx,
+          'guides',
           'INSERT INTO guides (title, location, description, template, marketplace_id, marketplace_updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-          title, location, description, template, marketplaceId, marketplaceUpdatedAt
+          [title, location, description, template, marketplaceId, marketplaceUpdatedAt]
         );
-        const newGuideRows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
-        const newGuide = newGuideRows[0];
 
         const { validated, skipped } = validateMarketplaceBlocks(b.blocks);
         await insertMarketplaceBlocks(ctx, newGuide.id, 0, validated);
@@ -1534,7 +1612,7 @@ module.exports = definePlugin({
         const b = req.body || {};
         const guideId = Number(b.guideId);
         if (!Number.isInteger(guideId)) return error(400, 'guideId is required');
-        const existing = await ctx.db.query('SELECT id FROM guides WHERE id = ?', guideId);
+        const existing = await dbQuery(ctx, 'SELECT id FROM guides WHERE id = ?', guideId);
         if (!existing.length) return error(404, 'Guide not found');
 
         const { validated, skipped } = validateMarketplaceBlocks(b.blocks);
@@ -1554,14 +1632,14 @@ module.exports = definePlugin({
         const guideId = Number(b.guideId);
         if (!Number.isInteger(guideId)) return error(400, 'guideId is required');
         if (!BLOCK_TYPES.includes(b.type)) return error(400, `type must be one of: ${BLOCK_TYPES.join(', ')}`);
-        const guideExists = await ctx.db.query('SELECT id FROM guides WHERE id = ?', guideId);
+        const guideExists = await dbQuery(ctx, 'SELECT id FROM guides WHERE id = ?', guideId);
         if (!guideExists.length) return error(404, 'Guide not found');
 
         let data = b.data || {};
         if (b.type === 'guide') {
           const refGuideId = Number(data.refGuideId);
           if (refGuideId === guideId) return error(400, "A guide can't embed itself");
-          const ref = await ctx.db.query('SELECT title, location FROM guides WHERE id = ?', refGuideId);
+          const ref = await dbQuery(ctx, 'SELECT title, location FROM guides WHERE id = ?', refGuideId);
           if (!ref.length) return error(404, 'Referenced guide not found');
           data = { refGuideId, title: ref[0].title, location: ref[0].location };
         }
@@ -1579,7 +1657,7 @@ module.exports = definePlugin({
         const denied = requireAdmin(req); if (denied) return denied;
         const b = req.body || {};
         if (!Number.isInteger(b.id)) return error(400, 'id is required');
-        const existing = await ctx.db.query('SELECT * FROM guide_blocks WHERE id = ?', b.id);
+        const existing = await dbQuery(ctx, 'SELECT * FROM guide_blocks WHERE id = ?', b.id);
         if (!existing.length) return error(404, 'Block not found');
         const cur = existing[0];
         let data = b.data || {};
@@ -1590,14 +1668,15 @@ module.exports = definePlugin({
         if (cur.type === 'guide') {
           const refGuideId = Number(data.refGuideId);
           if (refGuideId === cur.guide_id) return error(400, "A guide can't embed itself");
-          const ref = await ctx.db.query('SELECT title, location FROM guides WHERE id = ?', refGuideId);
+          const ref = await dbQuery(ctx, 'SELECT title, location FROM guides WHERE id = ?', refGuideId);
           if (!ref.length) return error(404, 'Referenced guide not found');
           data = { refGuideId, title: ref[0].title, location: ref[0].location };
         }
         const normalized = validateBlockData(cur.type, data);
         if (typeof normalized === 'string') return error(400, normalized);
-        await ctx.db.exec(`UPDATE guide_blocks SET data = ?, updated_at = datetime('now') WHERE id = ?`, JSON.stringify(normalized), b.id);
-        const rows = await ctx.db.query('SELECT * FROM guide_blocks WHERE id = ?', b.id);
+        const engine = await dbEngine(ctx);
+        await dbExec(ctx, `UPDATE guide_blocks SET data = ?, updated_at = ${nowCall(engine)} WHERE id = ?`, JSON.stringify(normalized), b.id);
+        const rows = await dbQuery(ctx, 'SELECT * FROM guide_blocks WHERE id = ?', b.id);
         return json(200, { block: blockRow(rows[0]) });
       },
     },
@@ -1607,7 +1686,7 @@ module.exports = definePlugin({
         const denied = requireAdmin(req); if (denied) return denied;
         const id = Number(req.query.id);
         if (!Number.isInteger(id)) return error(400, 'id is required');
-        await ctx.db.exec('DELETE FROM guide_blocks WHERE id = ?', id);
+        await dbExec(ctx, 'DELETE FROM guide_blocks WHERE id = ?', id);
         return json(200, { deleted: true });
       },
     },
@@ -1620,7 +1699,7 @@ module.exports = definePlugin({
         const orderedIds = Array.isArray(b.orderedIds) ? b.orderedIds.map(Number) : null;
         if (!Number.isInteger(guideId)) return error(400, 'guideId is required');
         if (!orderedIds || !orderedIds.length) return error(400, 'orderedIds is required');
-        const existing = await ctx.db.query('SELECT id FROM guide_blocks WHERE guide_id = ?', guideId);
+        const existing = await dbQuery(ctx, 'SELECT id FROM guide_blocks WHERE guide_id = ?', guideId);
         const existingIds = new Set(existing.map((r) => r.id));
         const submittedIds = new Set(orderedIds);
         if (
@@ -1641,15 +1720,15 @@ module.exports = definePlugin({
         }));
         if (typeof ctx.db.tx === 'function') {
           for (let i = 0; i < ops.length; i += 90) { // tx caps out at 100 ops per call — chunk with margin
-            await ctx.db.tx(ops.slice(i, i + 90));
+            await dbTx(ctx, ops.slice(i, i + 90));
           }
         } else {
           for (const op of ops) {
-            await ctx.db.exec(op.sql, ...op.args);
+            await dbExec(ctx, op.sql, ...op.args);
             await sleep(RATE_LIMIT_GAP_MS);
           }
         }
-        const rows = await ctx.db.query('SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', guideId);
+        const rows = await dbQuery(ctx, 'SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', guideId);
         return json(200, { blocks: rows.map(blockRow) });
       },
     },
@@ -1739,11 +1818,11 @@ module.exports = definePlugin({
         const guideId = Number(b.guideId);
         if (!Number.isInteger(guideId)) return error(400, 'guideId is required');
         const alreadyTriedIds = new Set(Array.isArray(b.alreadyTriedIds) ? b.alreadyTriedIds.map(Number) : []);
-        const guideRows = await ctx.db.query('SELECT * FROM guides WHERE id = ?', guideId);
+        const guideRows = await dbQuery(ctx, 'SELECT * FROM guides WHERE id = ?', guideId);
         if (!guideRows.length) return error(404, 'Guide not found');
         const guide = guideRows[0];
 
-        const blockRows = await ctx.db.query(`SELECT * FROM guide_blocks WHERE guide_id = ? AND type = 'place' ORDER BY position ASC`, guideId);
+        const blockRows = await dbQuery(ctx, `SELECT * FROM guide_blocks WHERE guide_id = ? AND type = 'place' ORDER BY position ASC`, guideId);
         const blocks = blockRows.map(blockRow);
         const missing = blocks.filter((bl) => !(typeof bl.data.lat === 'number' && typeof bl.data.lon === 'number') && !alreadyTriedIds.has(bl.id));
         if (!missing.length) return json(200, { fixed: 0, checked: 0, remaining: 0, triedIds: [] });
@@ -1765,9 +1844,9 @@ module.exports = definePlugin({
         });
         if (ops.length) {
           if (typeof ctx.db.tx === 'function') {
-            for (let i = 0; i < ops.length; i += 90) await ctx.db.tx(ops.slice(i, i + 90));
+            for (let i = 0; i < ops.length; i += 90) await dbTx(ctx, ops.slice(i, i + 90));
           } else {
-            for (const op of ops) { await ctx.db.exec(op.sql, ...op.args); await sleep(RATE_LIMIT_GAP_MS); }
+            for (const op of ops) { await dbExec(ctx, op.sql, ...op.args); await sleep(RATE_LIMIT_GAP_MS); }
           }
         }
         return json(200, {
@@ -1786,7 +1865,7 @@ module.exports = definePlugin({
         const guideId = Number(b.guideId);
         if (!Number.isInteger(guideId)) return error(400, 'guideId is required');
         if (!b.xid || typeof b.xid !== 'string') return error(400, 'xid is required');
-        const guideExists = await ctx.db.query('SELECT id FROM guides WHERE id = ?', guideId);
+        const guideExists = await dbQuery(ctx, 'SELECT id FROM guides WHERE id = ?', guideId);
         if (!guideExists.length) return error(404, 'Guide not found');
         try {
           const apiKey = await ctx.settings.get('opentripmap_api_key');
@@ -1877,7 +1956,7 @@ module.exports = definePlugin({
         const offset = Number.isInteger(Number(b.offset)) && Number(b.offset) > 0 ? Number(b.offset) : 0;
         if (!collectionIdInput && !newCollectionName) return error(400, 'Pick an existing collection or name a new one');
 
-        const guideRows = await ctx.db.query('SELECT * FROM guides WHERE id = ?', guideId);
+        const guideRows = await dbQuery(ctx, 'SELECT * FROM guides WHERE id = ?', guideId);
         if (!guideRows.length) return error(404, 'Guide not found');
         const isAdmin = !!(req.user && req.user.isAdmin);
         if (guideRows[0].status !== 'published' && !isAdmin) return error(404, 'Guide not found');
@@ -1896,7 +1975,7 @@ module.exports = definePlugin({
           }
         }
 
-        const blocks = (await ctx.db.query('SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', guideId)).map(blockRow);
+        const blocks = (await dbQuery(ctx, 'SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', guideId)).map(blockRow);
         const places = blocks.filter((bl) => bl.type === 'place').map((bl) => bl.data);
         const total = places.length;
         const batch = places.slice(offset, offset + BULK_CTX_BATCH_SIZE);
@@ -1929,7 +2008,7 @@ module.exports = definePlugin({
         if (!Number.isInteger(collectionId)) return error(400, 'collectionId is required');
         if (placeId == null) return error(400, 'placeId is required');
         if (!ctx.collections) return error(400, "This TREK instance doesn't support Collections yet — try updating TREK.");
-        const guideExists = await ctx.db.query('SELECT id FROM guides WHERE id = ?', guideId);
+        const guideExists = await dbQuery(ctx, 'SELECT id FROM guides WHERE id = ?', guideId);
         if (!guideExists.length) return error(404, 'Guide not found');
         try {
           const collection = await ctx.collections.get(collectionId);
@@ -1972,14 +2051,14 @@ module.exports = definePlugin({
         const tripId = Number(b.tripId);
         const blockId = Number(b.blockId);
         if (!Number.isInteger(tripId) || !Number.isInteger(blockId)) return error(400, 'tripId and blockId are required');
-        const rows = await ctx.db.query('SELECT * FROM guide_blocks WHERE id = ?', blockId);
+        const rows = await dbQuery(ctx, 'SELECT * FROM guide_blocks WHERE id = ?', blockId);
         if (!rows.length) return error(404, 'Block not found');
         const block = blockRow(rows[0]);
         if (block.type !== 'place' && block.type !== 'activity') return error(400, 'Only a place or activity can be added to a trip');
         // Block ids are sequential across every guide, so a non-admin could otherwise guess/probe
         // one belonging to an unpublished draft — enforce the same draft-visibility rule
         // /guide/plan-trip already does, instead of only gating on the block's own type.
-        const guideRows = await ctx.db.query('SELECT status FROM guides WHERE id = ?', block.guideId);
+        const guideRows = await dbQuery(ctx, 'SELECT status FROM guides WHERE id = ?', block.guideId);
         const isAdmin = !!(req.user && req.user.isAdmin);
         if (!guideRows.length || (guideRows[0].status !== 'published' && !isAdmin)) return error(404, 'Block not found');
         try {
@@ -2008,11 +2087,11 @@ module.exports = definePlugin({
         const newCollectionName = b.newCollectionName ? String(b.newCollectionName).trim().slice(0, 200) : '';
         if (!collectionIdInput && !newCollectionName) return error(400, 'Pick an existing collection or name a new one');
 
-        const rows = await ctx.db.query('SELECT * FROM guide_blocks WHERE id = ?', blockId);
+        const rows = await dbQuery(ctx, 'SELECT * FROM guide_blocks WHERE id = ?', blockId);
         if (!rows.length) return error(404, 'Block not found');
         const block = blockRow(rows[0]);
         if (block.type !== 'place' && block.type !== 'activity') return error(400, 'Only a place or activity can be saved to a collection');
-        const guideRows = await ctx.db.query('SELECT status FROM guides WHERE id = ?', block.guideId);
+        const guideRows = await dbQuery(ctx, 'SELECT status FROM guides WHERE id = ?', block.guideId);
         const isAdmin = !!(req.user && req.user.isAdmin);
         if (!guideRows.length || (guideRows[0].status !== 'published' && !isAdmin)) return error(404, 'Block not found');
 
@@ -2050,7 +2129,7 @@ module.exports = definePlugin({
         if (span < 0) return error(400, 'endDate must be on or after startDate');
         if (span > 365) return error(400, 'That date range is too long (max 366 days)');
 
-        const guideRows = await ctx.db.query('SELECT * FROM guides WHERE id = ?', guideId);
+        const guideRows = await dbQuery(ctx, 'SELECT * FROM guides WHERE id = ?', guideId);
         if (!guideRows.length) return error(404, 'Guide not found');
         const isAdmin = !!(req.user && req.user.isAdmin);
         if (guideRows[0].status !== 'published' && !isAdmin) return error(404, 'Guide not found');
@@ -2073,7 +2152,7 @@ module.exports = definePlugin({
           }
         }
 
-        const blocks = (await ctx.db.query('SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', guideId)).map(blockRow);
+        const blocks = (await dbQuery(ctx, 'SELECT * FROM guide_blocks WHERE guide_id = ? ORDER BY position ASC', guideId)).map(blockRow);
         const placeItems = [];
         let currentDayNumber = null;
         for (const block of blocks) {
@@ -2171,12 +2250,12 @@ module.exports = definePlugin({
         const geocodedCount = otmMatched + addrGeocode.matched;
         const hasDays = places.some((p) => p.dayNumber != null);
 
-        await ctx.db.exec(
+        const guide = await insertRowAndGet(
+          ctx,
+          'guides',
           'INSERT INTO guides (title, location, description, template) VALUES (?, ?, ?, ?)',
-          meta.title, meta.location, meta.description, hasDays ? 'itinerary' : 'blank'
+          [meta.title, meta.location, meta.description, hasDays ? 'itinerary' : 'blank']
         );
-        const guideRows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
-        const guide = guideRows[0];
 
         const result = await insertPdfPlaceBlocks(ctx, guide.id, places, 0, null);
 
@@ -2212,7 +2291,7 @@ module.exports = definePlugin({
         const text = truncated ? rawText.slice(0, MAX_PDF_TEXT_CHARS) : rawText;
         const carryDay = Number.isInteger(b.carryDay) ? b.carryDay : null;
 
-        const existing = await ctx.db.query('SELECT id, title, location FROM guides WHERE id = ?', guideId);
+        const existing = await dbQuery(ctx, 'SELECT id, title, location FROM guides WHERE id = ?', guideId);
         if (!existing.length) return error(404, 'Guide not found');
 
         const { places, usedAi, aiFallbackReason, parsedAs } = await extractPdfPlacesChunk(ctx, text);
@@ -2260,12 +2339,12 @@ module.exports = definePlugin({
         if (payload.error) return payload.error;
         const { title, location, hasDays, sanitized, bookingItems, bookingBlocks, totalPlaces } = payload;
 
-        await ctx.db.exec(
+        const guide = await insertRowAndGet(
+          ctx,
+          'guides',
           'INSERT INTO guides (title, location, description, template) VALUES (?, ?, ?, ?)',
-          title, location, null, hasDays ? 'itinerary' : 'list'
+          [title, location, null, hasDays ? 'itinerary' : 'list']
         );
-        const guideRows = await ctx.db.query('SELECT * FROM guides WHERE id = last_insert_rowid()');
-        const guide = guideRows[0];
 
         let pos = 0;
         if (bookingBlocks.length) {
