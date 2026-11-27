@@ -49,15 +49,10 @@ function requireAdmin(req) {
 let cachedEngine = null;
 async function dbEngine(ctx) {
   if (cachedEngine) return cachedEngine;
-  try {
-    if (ctx.db && typeof ctx.db.engine === 'function') {
-      const e = await ctx.db.engine();
-      if (e === 'postgres' || e === 'sqlite') { cachedEngine = e; return e; }
-    }
-  } catch {
-    // Host without db.engine(): SQLite-only TREK, pre-dates the Postgres move.
-  }
-  cachedEngine = 'sqlite';
+  // Host without db.engine(): SQLite-only TREK, pre-dates the Postgres move. A throwing
+  // engine() is not caught: on Postgres it carries the host's real refusal (e.g. privileged role).
+  const e = ctx.db && typeof ctx.db.engine === 'function' ? await ctx.db.engine() : 'sqlite';
+  cachedEngine = e === 'postgres' ? 'postgres' : 'sqlite';
   return cachedEngine;
 }
 function isPostgresEngine(engine) { return engine === 'postgres'; }
@@ -1310,8 +1305,9 @@ module.exports = definePlugin({
     // model, so content created before this update isn't stranded. Guarded by a plain
     // count check (not ctx.db.migrate, which only runs static SQL) — safe to leave in
     // place permanently since it's a no-op once guide_blocks has anything in it.
-    const [{ blockCount }] = await dbQuery(ctx, 'SELECT COUNT(*) AS blockCount FROM guide_blocks');
-    const [{ placeCount }] = await dbQuery(ctx, 'SELECT COUNT(*) AS placeCount FROM guide_places');
+    // Lowercase aliases: Postgres folds unquoted `AS blockCount` to `blockcount`.
+    const [{ n: blockCount }] = await dbQuery(ctx, 'SELECT COUNT(*) AS n FROM guide_blocks');
+    const [{ n: placeCount }] = await dbQuery(ctx, 'SELECT COUNT(*) AS n FROM guide_places');
     if (blockCount === 0 && placeCount > 0) {
       const guides = await dbQuery(ctx, 'SELECT id FROM guides');
       for (const g of guides) {
